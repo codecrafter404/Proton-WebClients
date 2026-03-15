@@ -50,3 +50,6 @@ tests/mail/old/binaries/tokens.json
 *:Zone.Identifier
 CLAUDE.md
 .taskmaster*
+# Go backend
+backend/calendar.db
+*.db

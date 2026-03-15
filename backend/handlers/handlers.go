@@ -50,7 +50,11 @@ func pathParam(r *http.Request, index int) string {
 
 // ListCalendars handles GET /calendar/v1
 func (h *Handler) ListCalendars(w http.ResponseWriter, r *http.Request) {
-	cals := h.Store.ListCalendars()
+	cals, err := h.Store.ListCalendars()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":      1000,
 		"Calendars": cals,
@@ -426,7 +430,11 @@ func (h *Handler) UpdateCalendarSettings(w http.ResponseWriter, r *http.Request)
 
 // GetUserSettings handles GET /settings/calendar
 func (h *Handler) GetUserSettings(w http.ResponseWriter, r *http.Request) {
-	settings := h.Store.GetUserSettings()
+	settings, err := h.Store.GetUserSettings()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":                 1000,
 		"CalendarUserSettings": settings,
@@ -441,7 +449,11 @@ func (h *Handler) UpdateUserSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings := h.Store.UpdateUserSettings(update)
+	settings, err := h.Store.UpdateUserSettings(update)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":                 1000,
 		"CalendarUserSettings": settings,
@@ -563,25 +575,31 @@ func (h *Handler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 
 // GetTimezones handles GET /calendar/v1/timezones
 func (h *Handler) GetTimezones(w http.ResponseWriter, r *http.Request) {
-	timezones := []map[string]string{
-		{"ID": "UTC", "City": "UTC"},
-		{"ID": "America/New_York", "City": "New York"},
-		{"ID": "America/Chicago", "City": "Chicago"},
-		{"ID": "America/Denver", "City": "Denver"},
-		{"ID": "America/Los_Angeles", "City": "Los Angeles"},
-		{"ID": "Europe/London", "City": "London"},
-		{"ID": "Europe/Berlin", "City": "Berlin"},
-		{"ID": "Europe/Paris", "City": "Paris"},
-		{"ID": "Europe/Zurich", "City": "Zurich"},
-		{"ID": "Asia/Tokyo", "City": "Tokyo"},
-		{"ID": "Asia/Shanghai", "City": "Shanghai"},
-		{"ID": "Asia/Kolkata", "City": "Kolkata"},
-		{"ID": "Australia/Sydney", "City": "Sydney"},
-		{"ID": "Pacific/Auckland", "City": "Auckland"},
+	tzs, err := h.Store.ListTimezones()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":      1000,
-		"Timezones": timezones,
+		"Timezones": tzs,
+	})
+}
+
+// GetAlarm handles GET /calendar/v1/{calendarID}/alarms/{alarmID}
+func (h *Handler) GetAlarm(w http.ResponseWriter, r *http.Request) {
+	calendarID := pathParam(r, 2)
+	alarmID := pathParam(r, 4)
+
+	alarm, err := h.Store.GetAlarm(calendarID, alarmID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":  1000,
+		"Alarm": alarm,
 	})
 }
 

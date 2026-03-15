@@ -4,26 +4,46 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/codecrafter404/Proton-WebClients/backend/auth"
 	"github.com/codecrafter404/Proton-WebClients/backend/handlers"
 )
 
 // New creates a new HTTP router with all calendar API routes.
-func New(h *handlers.Handler) http.Handler {
+func New(h *handlers.Handler, authMgr *auth.Manager) http.Handler {
 	mux := http.NewServeMux()
 
 	// We use a custom dispatcher because the standard ServeMux doesn't
 	// support path parameters. We route based on method + path pattern.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		route(h, w, r)
+		route(h, authMgr, w, r)
 	})
 
 	return mux
 }
 
-func route(h *handlers.Handler, w http.ResponseWriter, r *http.Request) {
+func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+
+	// Auth routes: /core/v4/auth
+	if path == "/core/v4/auth" {
+		switch method {
+		case http.MethodPost:
+			authMgr.HandleLogin(w, r)
+		case http.MethodDelete:
+			authMgr.HandleLogout(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	// Auth refresh: /auth/refresh
+	if path == "/auth/refresh" && method == http.MethodPost {
+		authMgr.HandleRefresh(w, r)
+		return
+	}
 
 	// settings/calendar
 	if path == "/settings/calendar" {
@@ -146,6 +166,11 @@ func route(h *handlers.Handler, w http.ResponseWriter, r *http.Request) {
 			// /calendar/v1/{calendarID}/alarms
 			if len(parts) == 4 && method == http.MethodGet {
 				h.ListAlarms(w, r)
+				return
+			}
+			// /calendar/v1/{calendarID}/alarms/{alarmID}
+			if len(parts) == 5 && method == http.MethodGet {
+				h.GetAlarm(w, r)
 				return
 			}
 

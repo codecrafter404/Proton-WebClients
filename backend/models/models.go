@@ -218,6 +218,7 @@ type CalendarAlarm struct {
 	EventID    string `json:"EventID"`
 	Occurrence int64  `json:"Occurrence"`
 	Trigger    string `json:"Trigger"`
+	IsEmail    bool   `json:"IsEmail"`
 }
 
 // --- API Request/Response Types ---
