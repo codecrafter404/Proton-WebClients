@@ -53,3 +53,12 @@ CLAUDE.md
 # Go backend
 backend/calendar.db
 *.db
+
+# E2E test artifacts
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+backend/calendar-api
+backend/calendar.db-shm
+backend/calendar.db-wal
+e2e/package-lock.json
