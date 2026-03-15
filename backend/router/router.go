@@ -28,6 +28,12 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 
 	// ── Auth routes ──────────────────────────────────────────────────
 
+	// GET /challenge/v4/html (captcha/challenge iframe)
+	if strings.HasPrefix(path, "/challenge/") {
+		h.HandleChallenge(w, r)
+		return
+	}
+
 	// POST /core/v4/auth/info  (SRP auth info)
 	if path == "/core/v4/auth/info" && method == http.MethodPost {
 		authMgr.HandleAuthInfo(w, r)
@@ -62,7 +68,25 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 
 	// POST /auth/v4/sessions
 	if path == "/auth/v4/sessions" && method == http.MethodPost {
-		h.HandleSessions(w, r)
+		authMgr.HandleUnauthSession(w, r)
+		return
+	}
+
+	// POST /core/v4/auth/cookies
+	if path == "/core/v4/auth/cookies" && method == http.MethodPost {
+		authMgr.HandleAuthCookies(w, r)
+		return
+	}
+
+	// GET /auth/v4/sessions/local
+	if path == "/auth/v4/sessions/local" && method == http.MethodGet {
+		h.HandleLocalSessions(w, r)
+		return
+	}
+
+	// GET|PUT /auth/v4/sessions/local/key
+	if path == "/auth/v4/sessions/local/key" {
+		h.HandleLocalKey(w, r)
 		return
 	}
 
@@ -82,6 +106,10 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 	}
 	if path == "/core/v4/settings" && method == http.MethodGet {
 		h.HandleCoreSettings(w, r)
+		return
+	}
+	if path == "/core/v4/settings/password" && method == http.MethodPut {
+		h.HandleCatchAll(w, r)
 		return
 	}
 	if path == "/core/v4/features" && method == http.MethodGet {
@@ -104,12 +132,43 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 		h.HandlePlansDefault(w, r)
 		return
 	}
+
+	// ── Feature flags (Unleash) ─────────────────────────────────────
+
+	if strings.HasPrefix(path, "/feature/v2/frontend") {
+		if strings.Contains(path, "/metrics") {
+			h.HandleFeatureMetrics(w, r)
+		} else {
+			h.HandleFeatureFlags(w, r)
+		}
+		return
+	}
+
 	if strings.HasPrefix(path, "/core/v4/payments/") {
 		switch {
 		case strings.HasSuffix(path, "/methods"):
 			h.HandlePaymentMethods(w, r)
 		case strings.HasSuffix(path, "/status"):
 			h.HandlePaymentStatus(w, r)
+		case strings.HasSuffix(path, "/subscription"):
+			h.HandleSubscription(w, r)
+		default:
+			h.HandleCatchAll(w, r)
+		}
+		return
+	}
+
+	// Payment routes (v4/v5 without /core/ prefix)
+	if strings.HasPrefix(path, "/payments/") {
+		switch {
+		case strings.HasSuffix(path, "/plans/default"):
+			h.HandlePaymentPlansDefault(w, r)
+		case strings.HasSuffix(path, "/plans"):
+			h.HandlePaymentPlans(w, r)
+		case strings.HasSuffix(path, "/status"):
+			h.HandlePaymentStatusV5(w, r)
+		case strings.HasSuffix(path, "/methods"):
+			h.HandlePaymentMethods(w, r)
 		case strings.HasSuffix(path, "/subscription"):
 			h.HandleSubscription(w, r)
 		default:
@@ -141,7 +200,7 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 
 	if len(parts) < 2 || parts[0] != "calendar" || parts[1] != "v1" {
 		// Unknown route – try catch-all for /core/ prefixed paths
-		if strings.HasPrefix(path, "/core/") || strings.HasPrefix(path, "/auth/") {
+		if strings.HasPrefix(path, "/core/") || strings.HasPrefix(path, "/auth/") || strings.HasPrefix(path, "/feature/") || strings.HasPrefix(path, "/settings/") || strings.HasPrefix(path, "/domains/") || strings.HasPrefix(path, "/payments/") {
 			h.HandleCatchAll(w, r)
 			return
 		}
@@ -166,6 +225,14 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 	if len(parts) == 3 && parts[2] == "timezones" {
 		h.GetTimezones(w, r)
 		return
+	}
+
+	// /calendar/v1/bookings and /calendar/v1/booking
+	if len(parts) == 3 && (parts[2] == "bookings" || parts[2] == "booking") {
+		if method == http.MethodGet {
+			h.HandleCatchAll(w, r)
+			return
+		}
 	}
 
 	// /calendar/v1/directory

@@ -95,6 +95,15 @@ func (s spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Serve login.html for /login routes if available (standalone mode)
+	if strings.HasPrefix(r.URL.Path, "/login") {
+		if _, err := fs.Stat(s.root, "login.html"); err == nil {
+			r.URL.Path = "/login.html"
+			http.FileServer(http.Dir(s.dir)).ServeHTTP(w, r)
+			return
+		}
+	}
+
 	// Fall back to index.html for SPA routing
 	r.URL.Path = "/"
 	http.FileServer(http.Dir(s.dir)).ServeHTTP(w, r)

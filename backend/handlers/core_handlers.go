@@ -25,18 +25,7 @@ func (h *Handler) HandleCoreUsers(w http.ResponseWriter, r *http.Request) {
 			"Currency":    "USD",
 			"Credit":      0,
 			"MnemonicStatus": 0,
-			"Keys": []map[string]interface{}{
-				{
-					"ID":          "user-key-1",
-					"Version":     3,
-					"Primary":     1,
-					"Fingerprint": "000000000000000000000000000000000000dead",
-					"PrivateKey":  "",
-					"Token":       nil,
-					"Signature":   nil,
-					"Active":      1,
-				},
-			},
+			"Keys":           []interface{}{},
 			"ToMigrate":      0,
 			"AccountRecovery": nil,
 		},
@@ -69,13 +58,8 @@ func (h *Handler) HandleCoreAddresses(w http.ResponseWriter, r *http.Request) {
 // handleCoreKeySalts handles GET /core/v4/keys/salts
 func (h *Handler) HandleCoreKeySalts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"Code": 1000,
-		"KeySalts": []map[string]interface{}{
-			{
-				"ID":      "user-key-1",
-				"KeySalt": "",
-			},
-		},
+		"Code":     1000,
+		"KeySalts": []interface{}{},
 	})
 }
 
@@ -192,6 +176,38 @@ func (h *Handler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAuthCookies handles POST /core/v4/auth/cookies
+func (h *Handler) HandleAuthCookies(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code": 1000,
+	})
+}
+
+// handleLocalSessions handles GET /auth/v4/sessions/local
+func (h *Handler) HandleLocalSessions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":     1000,
+		"Sessions": []interface{}{},
+	})
+}
+
+// handleLocalKey handles GET/PUT /auth/v4/sessions/local/key
+func (h *Handler) HandleLocalKey(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"Code":      1000,
+			"ClientKey": "",
+		})
+	case http.MethodPut:
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"Code": 1000,
+		})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // handleOrganization handles GET /core/v4/organizations
 func (h *Handler) HandleOrganization(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -263,6 +279,79 @@ func (h *Handler) HandleSubscription(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCatchAll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code": 1000,
+	})
+}
+
+// HandleFeatureFlags returns an empty Unleash feature toggles response.
+func (h *Handler) HandleFeatureFlags(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"toggles": []interface{}{},
+	})
+}
+
+// HandleFeatureMetrics accepts Unleash client metrics.
+func (h *Handler) HandleFeatureMetrics(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code": 1000,
+	})
+}
+
+// HandleChallenge returns a minimal challenge HTML page.
+// The Proton frontend loads this in an iframe for anti-bot measures.
+func (h *Handler) HandleChallenge(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`<!DOCTYPE html>
+<html><head><script>
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'pm-challenge') {
+    e.source.postMessage({type: 'pm-challenge-reply', payload: ''}, e.origin);
+  }
+});
+if (window.parent) {
+  window.parent.postMessage({type: 'pm-load'}, '*');
+}
+</script></head><body></body></html>`))
+}
+
+// HandlePaymentPlans handles GET /payments/v4/plans and /payments/v5/plans
+func (h *Handler) HandlePaymentPlans(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":  1000,
+		"Plans": []interface{}{},
+	})
+}
+
+// HandlePaymentPlansDefault handles GET /payments/v4/plans/default
+func (h *Handler) HandlePaymentPlansDefault(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code": 1000,
+		"Plans": map[string]interface{}{
+			"free": map[string]interface{}{
+				"ID":        "free",
+				"Type":      0,
+				"Name":      "free",
+				"Title":     "Free",
+				"MaxMembers": 1,
+				"MaxSpace":   1073741824,
+				"Features":   0,
+				"State":      1,
+			},
+		},
+	})
+}
+
+// HandlePaymentStatusV5 handles GET /payments/v5/status
+func (h *Handler) HandlePaymentStatusV5(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":       1000,
+		"VendorStatus": map[string]interface{}{
+			"Stripe":  true,
+			"Paypal":  false,
+			"Apple":   false,
+			"Cash":    false,
+			"Bitcoin": false,
+		},
 	})
 }
 

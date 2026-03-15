@@ -208,6 +208,22 @@ func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	sess := m.CreateSession(username)
 
+	// Set cookies for the new session
+	http.SetCookie(w, &http.Cookie{
+		Name:     "AUTH-" + sess.UID,
+		Value:    sess.AccessToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "REFRESH-" + sess.UID,
+		Value:    sess.RefreshToken,
+		Path:     "/api/auth/refresh",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":         1000,
 		"UID":          sess.UID,
@@ -233,9 +249,23 @@ func (m *Manager) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		UID          string `json:"UID"`
 		RefreshToken string `json:"RefreshToken"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	_ = json.NewDecoder(r.Body).Decode(&req) // ignore error - body may be empty
+
+	// Fall back to x-pm-uid header
+	if req.UID == "" {
+		req.UID = r.Header.Get("x-pm-uid")
+	}
+
+	// Fall back to cookie-based refresh token
+	if req.RefreshToken == "" && req.UID != "" {
+		if c, err := r.Cookie("REFRESH-" + req.UID); err == nil {
+			req.RefreshToken = c.Value
+		}
+	}
+
+	if req.UID == "" || req.RefreshToken == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"Code": 400, "Error": "invalid request body",
+			"Code": 400, "Error": "missing UID or RefreshToken",
 		})
 		return
 	}
@@ -247,6 +277,22 @@ func (m *Manager) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Update cookies with new tokens
+	http.SetCookie(w, &http.Cookie{
+		Name:     "AUTH-" + sess.UID,
+		Value:    sess.AccessToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "REFRESH-" + sess.UID,
+		Value:    sess.RefreshToken,
+		Path:     "/api/auth/refresh",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":         1000,
@@ -268,6 +314,81 @@ func (m *Manager) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleUnauthSession handles POST /auth/v4/sessions
+// Creates a temporary unauthenticated session used before login.
+func (m *Manager) HandleUnauthSession(w http.ResponseWriter, r *http.Request) {
+	sess := m.CreateSession("_unauth")
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":         1000,
+		"UID":          sess.UID,
+		"AccessToken":  sess.AccessToken,
+		"RefreshToken": sess.RefreshToken,
+		"ExpiresIn":    3600,
+		"TokenType":    "Bearer",
+		"Scope":        "full",
+	})
+}
+
+// HandleAuthCookies handles POST /core/v4/auth/cookies
+// Sets HTTP cookies for session auth (as the Proton frontend expects).
+func (m *Manager) HandleAuthCookies(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UID          string `json:"UID"`
+		RefreshToken string `json:"RefreshToken"`
+		State        string `json:"State"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"Code": 400, "Error": "invalid request body",
+		})
+		return
+	}
+
+	// Look up the session by UID to get the access token
+	m.mu.RLock()
+	sess, ok := m.sessions[req.UID]
+	m.mu.RUnlock()
+
+	if !ok {
+		// If we can't find the session, check the Authorization header
+		authHeader := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token != authHeader {
+			m.mu.RLock()
+			uid, tokenOk := m.tokens[token]
+			if tokenOk {
+				sess = m.sessions[uid]
+				ok = sess != nil
+			}
+			m.mu.RUnlock()
+		}
+	}
+
+	if ok && sess != nil {
+		// Set access token cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "AUTH-" + sess.UID,
+			Value:    sess.AccessToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		// Set refresh token cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "REFRESH-" + sess.UID,
+			Value:    sess.RefreshToken,
+			Path:     "/api/auth/refresh",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code": 1000,
+	})
+}
+
 // Middleware returns an HTTP middleware that validates the Bearer token.
 // It skips authentication for public endpoints.
 func (m *Manager) Middleware(next http.Handler) http.Handler {
@@ -282,29 +403,55 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 
 		// Public endpoints that don't require authentication
 		publicPaths := map[string]string{
-			"/core/v4/auth":         http.MethodPost,
-			"/core/v4/auth/info":    http.MethodPost,
-			"/core/v4/auth/modulus": http.MethodGet,
-			"/auth/refresh":        http.MethodPost,
-			"/auth/v4/sessions":    http.MethodPost,
+			"/core/v4/auth":            http.MethodPost,
+			"/core/v4/auth/info":       http.MethodPost,
+			"/core/v4/auth/modulus":    http.MethodGet,
+			"/auth/refresh":           http.MethodPost,
+			"/auth/v4/sessions":       http.MethodPost,
+			"/core/v4/auth/cookies":   http.MethodPost,
 		}
 		if method, ok := publicPaths[path]; ok && r.Method == method {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
-				"Code": 401, "Error": "missing authorization header",
-			})
-			return
+		// Public prefixes that don't require authentication
+		publicPrefixes := []string{
+			"/feature/",    // Unleash feature flags
+			"/challenge/",  // Captcha challenge
+		}
+		for _, prefix := range publicPrefixes {
+			if strings.HasPrefix(path, prefix) {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token == authHeader {
+		authHeader := r.Header.Get("Authorization")
+		token := ""
+		if authHeader != "" {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+			if token == authHeader {
+				writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
+					"Code": 401, "Error": "invalid authorization format",
+				})
+				return
+			}
+		}
+
+		// Fall back to cookie-based auth if no Authorization header
+		if token == "" {
+			uid := r.Header.Get("x-pm-uid")
+			if uid != "" {
+				if c, err := r.Cookie("AUTH-" + uid); err == nil {
+					token = c.Value
+				}
+			}
+		}
+
+		if token == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
-				"Code": 401, "Error": "invalid authorization format",
+				"Code": 401, "Error": "missing authorization header",
 			})
 			return
 		}
