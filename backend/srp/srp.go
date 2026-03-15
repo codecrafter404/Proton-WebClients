@@ -238,7 +238,7 @@ func NewServer() (*Server, error) {
 	srv.K = leToBigInt(expandHash(cat(gLE, srv.modBytes)))
 	srv.K.Mod(srv.K, srv.N)
 
-	if err := srv.generatePGPKeyAndSignModulus(); err != nil {
+	if err := srv.signModulusWithStaticKey(); err != nil {
 		return nil, err
 	}
 	return srv, nil
