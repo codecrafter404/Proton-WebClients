@@ -1,0 +1,230 @@
+package router
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/codecrafter404/Proton-WebClients/backend/handlers"
+)
+
+// New creates a new HTTP router with all calendar API routes.
+func New(h *handlers.Handler) http.Handler {
+	mux := http.NewServeMux()
+
+	// We use a custom dispatcher because the standard ServeMux doesn't
+	// support path parameters. We route based on method + path pattern.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		route(h, w, r)
+	})
+
+	return mux
+}
+
+func route(h *handlers.Handler, w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	method := r.Method
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+
+	// settings/calendar
+	if path == "/settings/calendar" {
+		switch method {
+		case http.MethodGet:
+			h.GetUserSettings(w, r)
+		case http.MethodPut:
+			h.UpdateUserSettings(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	// All other routes start with /calendar/v1
+	if len(parts) < 2 || parts[0] != "calendar" || parts[1] != "v1" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// /calendar/v1
+	if len(parts) == 2 {
+		switch method {
+		case http.MethodGet:
+			h.ListCalendars(w, r)
+		case http.MethodPost:
+			h.CreateCalendar(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	// /calendar/v1/timezones
+	if len(parts) == 3 && parts[2] == "timezones" {
+		h.GetTimezones(w, r)
+		return
+	}
+
+	// /calendar/v1/directory
+	if len(parts) == 3 && parts[2] == "directory" {
+		h.GetDirectory(w, r)
+		return
+	}
+
+	// /calendar/v1/events?UID=...
+	if len(parts) == 3 && parts[2] == "events" {
+		if method == http.MethodGet {
+			h.GetEventByUID(w, r)
+			return
+		}
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Routes with calendarID: /calendar/v1/{calendarID}/...
+	if len(parts) >= 3 {
+		calendarID := parts[2]
+		_ = calendarID
+
+		// /calendar/v1/{calendarID}
+		if len(parts) == 3 {
+			switch method {
+			case http.MethodGet:
+				h.GetCalendar(w, r)
+			case http.MethodPut:
+				h.UpdateCalendar(w, r)
+			case http.MethodDelete:
+				h.DeleteCalendar(w, r)
+			default:
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
+		resource := parts[3]
+
+		switch resource {
+		case "settings":
+			// /calendar/v1/{calendarID}/settings
+			if len(parts) == 4 {
+				switch method {
+				case http.MethodGet:
+					h.GetCalendarSettings(w, r)
+				case http.MethodPut:
+					h.UpdateCalendarSettings(w, r)
+				default:
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
+
+		case "members":
+			if len(parts) == 4 {
+				// /calendar/v1/{calendarID}/members
+				switch method {
+				case http.MethodGet:
+					h.ListMembers(w, r)
+				case http.MethodPost:
+					h.AddMember(w, r)
+				default:
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
+			if len(parts) == 5 {
+				// /calendar/v1/{calendarID}/members/{memberID}
+				switch method {
+				case http.MethodPut:
+					h.UpdateMember(w, r)
+				case http.MethodDelete:
+					h.RemoveMember(w, r)
+				default:
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
+
+		case "alarms":
+			// /calendar/v1/{calendarID}/alarms
+			if len(parts) == 4 && method == http.MethodGet {
+				h.ListAlarms(w, r)
+				return
+			}
+
+		case "events":
+			if len(parts) == 4 {
+				// /calendar/v1/{calendarID}/events
+				switch method {
+				case http.MethodGet:
+					h.ListEvents(w, r)
+				default:
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
+
+			if len(parts) == 5 {
+				subResource := parts[4]
+
+				switch subResource {
+				case "count":
+					// /calendar/v1/{calendarID}/events/count
+					if method == http.MethodGet {
+						h.GetEventsCount(w, r)
+						return
+					}
+				case "ids":
+					// /calendar/v1/{calendarID}/events/ids
+					if method == http.MethodGet {
+						h.GetEventIDs(w, r)
+						return
+					}
+				case "sync":
+					// /calendar/v1/{calendarID}/events/sync
+					if method == http.MethodPut {
+						h.SyncEvents(w, r)
+						return
+					}
+				default:
+					// /calendar/v1/{calendarID}/events/{eventID}
+					switch method {
+					case http.MethodGet:
+						h.GetEvent(w, r)
+					case http.MethodDelete:
+						h.DeleteEvent(w, r)
+					default:
+						http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+					}
+					return
+				}
+			}
+
+			if len(parts) == 6 {
+				subResource := parts[5]
+
+				switch subResource {
+				case "personal":
+					// /calendar/v1/{calendarID}/events/{eventID}/personal
+					if method == http.MethodPut {
+						h.UpdateEventPersonal(w, r)
+						return
+					}
+				case "attendees":
+					// /calendar/v1/{calendarID}/events/{eventID}/attendees
+					if method == http.MethodGet {
+						h.GetAttendees(w, r)
+						return
+					}
+				}
+			}
+
+			if len(parts) == 7 && parts[5] == "attendees" {
+				// /calendar/v1/{calendarID}/events/{eventID}/attendees/{attendeeID}
+				if method == http.MethodPut {
+					h.UpdateAttendee(w, r)
+					return
+				}
+			}
+		}
+	}
+
+	http.NotFound(w, r)
+}
