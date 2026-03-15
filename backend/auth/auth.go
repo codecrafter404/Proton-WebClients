@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codecrafter404/Proton-WebClients/backend/srp"
 )
 
 // Session represents an authenticated user session.
@@ -26,19 +28,28 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session // keyed by UID
 	tokens   map[string]string   // access token -> UID
-	users    map[string]string   // username -> password (demo users)
+
+	SRP *srp.Server
 }
 
-// NewManager creates a new auth manager with a default demo user.
-func NewManager() *Manager {
+// NewManager creates a new auth manager with SRP support.
+func NewManager() (*Manager, error) {
+	srpServer, err := srp.NewServer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SRP server: %w", err)
+	}
+
+	// Register default demo user
+	if err := srpServer.AddUserWithPassword("proton", "proton"); err != nil {
+		return nil, fmt.Errorf("failed to add default user: %w", err)
+	}
+
 	m := &Manager{
 		sessions: make(map[string]*Session),
 		tokens:   make(map[string]string),
-		users:    make(map[string]string),
+		SRP:      srpServer,
 	}
-	// Default demo user
-	m.users["proton"] = "proton"
-	return m
+	return m, nil
 }
 
 func randomHex(n int) string {
@@ -47,15 +58,10 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// Authenticate validates credentials and creates a session.
-func (m *Manager) Authenticate(username, password string) (*Session, error) {
+// CreateSession creates a new session for a user.
+func (m *Manager) CreateSession(username string) *Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	expected, ok := m.users[username]
-	if !ok || expected != password {
-		return nil, fmt.Errorf("invalid credentials")
-	}
 
 	uid := randomHex(16)
 	accessToken := randomHex(32)
@@ -72,8 +78,7 @@ func (m *Manager) Authenticate(username, password string) (*Session, error) {
 
 	m.sessions[uid] = sess
 	m.tokens[accessToken] = uid
-
-	return sess, nil
+	return sess
 }
 
 // Refresh creates a new access token from a refresh token.
@@ -102,7 +107,7 @@ func (m *Manager) Refresh(uid, refreshToken string) (*Session, error) {
 	return sess, nil
 }
 
-// Validate checks an access token and returns the session UID.
+// Validate checks an access token and returns the session.
 func (m *Manager) Validate(accessToken string) (*Session, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -131,15 +136,12 @@ func (m *Manager) Logout(uid string) {
 
 // --- HTTP Handlers ---
 
-// LoginRequest is the body for POST /core/v4/auth.
-type LoginRequest struct {
-	Username string `json:"Username"`
-	Password string `json:"Password"`
-}
-
-// HandleLogin handles POST /core/v4/auth
-func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	var req LoginRequest
+// HandleAuthInfo handles POST /core/v4/auth/info
+// Returns SRP parameters for the given username.
+func (m *Manager) HandleAuthInfo(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"Username"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"Code": 400, "Error": "invalid request body",
@@ -147,13 +149,64 @@ func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := m.Authenticate(req.Username, req.Password)
+	serverEph, salt, version, srpSession, err := m.SRP.GetAuthInfo(req.Username)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
-			"Code": 401, "Error": "invalid credentials",
+		// Return fake parameters to not reveal if user exists
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"Code":            1000,
+			"Modulus":         m.SRP.SignedModulus,
+			"ServerEphemeral": "",
+			"Version":         0,
+			"Salt":            "",
+			"SRPSession":      "",
 		})
 		return
 	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":            1000,
+		"Modulus":         m.SRP.SignedModulus,
+		"ServerEphemeral": serverEph,
+		"Version":         version,
+		"Salt":            salt,
+		"SRPSession":      srpSession,
+	})
+}
+
+// HandleAuthModulus handles GET /core/v4/auth/modulus
+func (m *Manager) HandleAuthModulus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":      1000,
+		"Modulus":   m.SRP.SignedModulus,
+		"ModulusID": "modulus-id-1",
+	})
+}
+
+// HandleLogin handles POST /core/v4/auth (SRP authentication)
+func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username        string `json:"Username"`
+		ClientEphemeral string `json:"ClientEphemeral"`
+		ClientProof     string `json:"ClientProof"`
+		SRPSession      string `json:"SRPSession"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"Code": 400, "Error": "invalid request body",
+		})
+		return
+	}
+
+	serverProof, username, err := m.SRP.VerifyAuth(req.SRPSession, req.ClientEphemeral, req.ClientProof)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
+			"Code":  8002,
+			"Error": "Incorrect login credentials. Please try again.",
+		})
+		return
+	}
+
+	sess := m.CreateSession(username)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":         1000,
@@ -162,20 +215,24 @@ func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		"RefreshToken": sess.RefreshToken,
 		"ExpiresIn":    86400,
 		"TokenType":    "Bearer",
-		"Scope":        "full",
+		"Scope":        "full self organization payments keys parent user addresses balance client settings member",
 		"UserID":       sess.UserID,
+		"ServerProof":  serverProof,
+		"PasswordMode": 1,
+		"2FA": map[string]interface{}{
+			"Enabled": 0,
+			"TOTP":    0,
+			"FIDO2":   map[string]interface{}{"AuthenticationOptions": nil, "RegisteredKeys": nil},
+		},
 	})
-}
-
-// RefreshRequest is the body for POST /auth/refresh.
-type RefreshRequest struct {
-	UID          string `json:"UID"`
-	RefreshToken string `json:"RefreshToken"`
 }
 
 // HandleRefresh handles POST /auth/refresh
 func (m *Manager) HandleRefresh(w http.ResponseWriter, r *http.Request) {
-	var req RefreshRequest
+	var req struct {
+		UID          string `json:"UID"`
+		RefreshToken string `json:"RefreshToken"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"Code": 400, "Error": "invalid request body",
@@ -212,21 +269,26 @@ func (m *Manager) HandleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // Middleware returns an HTTP middleware that validates the Bearer token.
-// It skips authentication for the auth endpoints themselves.
+// It skips authentication for public endpoints.
 func (m *Manager) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Skip auth for login, refresh, and OPTIONS (CORS preflight)
+		// Skip auth for OPTIONS (CORS preflight)
 		if r.Method == http.MethodOptions {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if path == "/core/v4/auth" && r.Method == http.MethodPost {
-			next.ServeHTTP(w, r)
-			return
+
+		// Public endpoints that don't require authentication
+		publicPaths := map[string]string{
+			"/core/v4/auth":         http.MethodPost,
+			"/core/v4/auth/info":    http.MethodPost,
+			"/core/v4/auth/modulus": http.MethodGet,
+			"/auth/refresh":        http.MethodPost,
+			"/auth/v4/sessions":    http.MethodPost,
 		}
-		if path == "/auth/refresh" && r.Method == http.MethodPost {
+		if method, ok := publicPaths[path]; ok && r.Method == method {
 			next.ServeHTTP(w, r)
 			return
 		}

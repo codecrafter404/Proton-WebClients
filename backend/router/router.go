@@ -26,7 +26,22 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 	method := r.Method
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 
-	// Auth routes: /core/v4/auth
+	// ── Auth routes ──────────────────────────────────────────────────
+
+	// POST /core/v4/auth/info  (SRP auth info)
+	if path == "/core/v4/auth/info" && method == http.MethodPost {
+		authMgr.HandleAuthInfo(w, r)
+		return
+	}
+
+	// GET /core/v4/auth/modulus
+	if path == "/core/v4/auth/modulus" && method == http.MethodGet {
+		authMgr.HandleAuthModulus(w, r)
+		return
+	}
+
+	// POST /core/v4/auth  (SRP login)
+	// DELETE /core/v4/auth (logout)
 	if path == "/core/v4/auth" {
 		switch method {
 		case http.MethodPost:
@@ -39,13 +54,72 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 		return
 	}
 
-	// Auth refresh: /auth/refresh
+	// POST /auth/refresh
 	if path == "/auth/refresh" && method == http.MethodPost {
 		authMgr.HandleRefresh(w, r)
 		return
 	}
 
-	// settings/calendar
+	// POST /auth/v4/sessions
+	if path == "/auth/v4/sessions" && method == http.MethodPost {
+		h.HandleSessions(w, r)
+		return
+	}
+
+	// ── Core API routes ──────────────────────────────────────────────
+
+	if path == "/core/v4/users" && method == http.MethodGet {
+		h.HandleCoreUsers(w, r)
+		return
+	}
+	if path == "/core/v4/addresses" && method == http.MethodGet {
+		h.HandleCoreAddresses(w, r)
+		return
+	}
+	if path == "/core/v4/keys/salts" && method == http.MethodGet {
+		h.HandleCoreKeySalts(w, r)
+		return
+	}
+	if path == "/core/v4/settings" && method == http.MethodGet {
+		h.HandleCoreSettings(w, r)
+		return
+	}
+	if path == "/core/v4/features" && method == http.MethodGet {
+		h.HandleCoreFeatures(w, r)
+		return
+	}
+	if path == "/core/v4/events/latest" && method == http.MethodGet {
+		h.HandleCoreEventsLatest(w, r)
+		return
+	}
+	if strings.HasPrefix(path, "/core/v4/events/") && method == http.MethodGet {
+		h.HandleCoreEvents(w, r)
+		return
+	}
+	if path == "/core/v4/organizations" && method == http.MethodGet {
+		h.HandleOrganization(w, r)
+		return
+	}
+	if path == "/core/v4/plans/default" && method == http.MethodGet {
+		h.HandlePlansDefault(w, r)
+		return
+	}
+	if strings.HasPrefix(path, "/core/v4/payments/") {
+		switch {
+		case strings.HasSuffix(path, "/methods"):
+			h.HandlePaymentMethods(w, r)
+		case strings.HasSuffix(path, "/status"):
+			h.HandlePaymentStatus(w, r)
+		case strings.HasSuffix(path, "/subscription"):
+			h.HandleSubscription(w, r)
+		default:
+			h.HandleCatchAll(w, r)
+		}
+		return
+	}
+
+	// ── Calendar settings ────────────────────────────────────────────
+
 	if path == "/settings/calendar" {
 		switch method {
 		case http.MethodGet:
@@ -58,8 +132,19 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 		return
 	}
 
-	// All other routes start with /calendar/v1
+	if path == "/calendar/v1/settings" && method == http.MethodGet {
+		h.HandleCalendarSettings(w, r)
+		return
+	}
+
+	// ── Calendar API routes ──────────────────────────────────────────
+
 	if len(parts) < 2 || parts[0] != "calendar" || parts[1] != "v1" {
+		// Unknown route – try catch-all for /core/ prefixed paths
+		if strings.HasPrefix(path, "/core/") || strings.HasPrefix(path, "/auth/") {
+			h.HandleCatchAll(w, r)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}

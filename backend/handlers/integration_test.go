@@ -13,39 +13,41 @@ import (
 // including authentication, CORS, routing, handlers, and persistence.
 // Run with: go test -v -run TestIntegration ./handlers/
 
-// TestIntegration_FullAuthLifecycle tests login, authenticated requests,
-// token refresh, and logout end-to-end.
+// TestIntegration_FullAuthLifecycle tests the auth info endpoint, authenticated
+// requests, token refresh, and logout end-to-end.
+// Note: Full SRP login is tested in the srp package. This test verifies
+// the HTTP layer works correctly with session-based auth.
 func TestIntegration_FullAuthLifecycle(t *testing.T) {
 	ts := newTestServer(t)
 
-	// --- Step 1: Login via HTTP ---
-	loginResp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth", map[string]string{
+	// --- Step 1: Verify auth/info returns SRP parameters ---
+	authInfoResp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth/info", map[string]string{
 		"Username": "proton",
-		"Password": "proton",
 	})
-	if loginResp.Code != http.StatusOK {
-		t.Fatalf("login: expected 200, got %d: %s", loginResp.Code, loginResp.Body.String())
+	if authInfoResp.Code != http.StatusOK {
+		t.Fatalf("auth/info: expected 200, got %d: %s", authInfoResp.Code, authInfoResp.Body.String())
 	}
-	loginData := parseResponse(t, loginResp)
-	if loginData["Code"].(float64) != 1000 {
-		t.Fatalf("login: expected Code 1000, got %v", loginData["Code"])
+	authInfoData := parseResponse(t, authInfoResp)
+	if authInfoData["Code"].(float64) != 1000 {
+		t.Fatalf("auth/info: expected Code 1000, got %v", authInfoData["Code"])
 	}
-
-	accessToken := loginData["AccessToken"].(string)
-	refreshToken := loginData["RefreshToken"].(string)
-	uid := loginData["UID"].(string)
-	userID := loginData["UserID"].(string)
-
-	if accessToken == "" || refreshToken == "" || uid == "" {
-		t.Fatal("login: missing tokens or UID")
+	if authInfoData["ServerEphemeral"].(string) == "" {
+		t.Fatal("auth/info: missing ServerEphemeral")
 	}
-	if userID != "user-1" {
-		t.Fatalf("login: expected UserID user-1, got %s", userID)
+	if authInfoData["Salt"].(string) == "" {
+		t.Fatal("auth/info: missing Salt")
+	}
+	if authInfoData["Modulus"].(string) == "" {
+		t.Fatal("auth/info: missing Modulus")
 	}
 
-	// --- Step 2: Authenticated request using returned token ---
-	ts2 := &testServer{handler: ts.handler, token: accessToken, uid: uid}
-	calResp := ts2.request(t, http.MethodGet, "/calendar/v1", nil)
+	// Use pre-existing session from newTestServer for the rest
+	accessToken := ts.token
+	refreshToken := ts.refreshToken
+	uid := ts.uid
+
+	// --- Step 2: Authenticated request using token ---
+	calResp := ts.request(t, http.MethodGet, "/calendar/v1", nil)
 	if calResp.Code != http.StatusOK {
 		t.Fatalf("list calendars: expected 200, got %d", calResp.Code)
 	}
@@ -74,6 +76,7 @@ func TestIntegration_FullAuthLifecycle(t *testing.T) {
 	}
 
 	// --- Step 5: Old token should be invalid after refresh ---
+	ts2 := &testServer{handler: ts.handler, token: accessToken, uid: uid}
 	oldTokenResp := ts2.request(t, http.MethodGet, "/calendar/v1", nil)
 	if oldTokenResp.Code != http.StatusUnauthorized {
 		t.Fatalf("old token after refresh: expected 401, got %d", oldTokenResp.Code)
@@ -250,26 +253,21 @@ func TestIntegration_CalendarEventLifecycle(t *testing.T) {
 func TestIntegration_MobileAPICompatibility(t *testing.T) {
 	ts := newTestServer(t)
 
-	// --- Login response must contain all fields mobile clients expect ---
-	loginResp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth", map[string]string{
+	// --- Auth info response must contain SRP fields mobile clients expect ---
+	authInfoResp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth/info", map[string]string{
 		"Username": "proton",
-		"Password": "proton",
 	})
-	loginData := parseResponse(t, loginResp)
+	authInfoData := parseResponse(t, authInfoResp)
 
-	requiredLoginFields := []string{"Code", "UID", "AccessToken", "RefreshToken", "ExpiresIn", "TokenType", "Scope", "UserID"}
-	for _, field := range requiredLoginFields {
-		if _, ok := loginData[field]; !ok {
-			t.Errorf("login response missing required field: %s", field)
+	requiredAuthInfoFields := []string{"Code", "Modulus", "ServerEphemeral", "Version", "Salt", "SRPSession"}
+	for _, field := range requiredAuthInfoFields {
+		if _, ok := authInfoData[field]; !ok {
+			t.Errorf("auth/info response missing required field: %s", field)
 		}
 	}
-	if loginData["TokenType"].(string) != "Bearer" {
-		t.Errorf("login: expected TokenType 'Bearer', got %v", loginData["TokenType"])
-	}
 
-	accessToken := loginData["AccessToken"].(string)
-	uid := loginData["UID"].(string)
-	tsAuth := &testServer{handler: ts.handler, token: accessToken, uid: uid}
+	// Use the pre-created session for authenticated requests
+	tsAuth := ts
 
 	// --- Timezones endpoint must return timezone list ---
 	tzResp := tsAuth.request(t, http.MethodGet, "/calendar/v1/timezones", nil)
@@ -477,30 +475,19 @@ func TestIntegration_CORSHeaders(t *testing.T) {
 	}
 }
 
-// TestIntegration_InvalidCredentials verifies login rejection with wrong credentials.
+// TestIntegration_InvalidCredentials verifies SRP login rejection with bad session.
 func TestIntegration_InvalidCredentials(t *testing.T) {
 	ts := newTestServer(t)
 
-	cases := []struct {
-		name     string
-		username string
-		password string
-	}{
-		{"wrong password", "proton", "wrong"},
-		{"wrong username", "wrong", "proton"},
-		{"empty credentials", "", ""},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth", map[string]string{
-				"Username": tc.username,
-				"Password": tc.password,
-			})
-			if resp.Code != http.StatusUnauthorized {
-				t.Errorf("expected 401, got %d", resp.Code)
-			}
-		})
+	// SRP login with invalid/non-existent session should fail
+	resp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth", map[string]string{
+		"Username":        "proton",
+		"ClientEphemeral": "AAAA",
+		"ClientProof":     "AAAA",
+		"SRPSession":      "nonexistent",
+	})
+	if resp.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.Code)
 	}
 }
 
@@ -509,21 +496,12 @@ func TestIntegration_InvalidCredentials(t *testing.T) {
 func TestIntegration_ConcurrentSessions(t *testing.T) {
 	ts := newTestServer(t)
 
-	// Create session 1 (simulating web client)
-	login1 := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth", map[string]string{
-		"Username": "proton", "Password": "proton",
-	})
-	data1 := parseResponse(t, login1)
-	token1 := data1["AccessToken"].(string)
-	uid1 := data1["UID"].(string)
-
-	// Create session 2 (simulating mobile client)
-	login2 := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth", map[string]string{
-		"Username": "proton", "Password": "proton",
-	})
-	data2 := parseResponse(t, login2)
-	token2 := data2["AccessToken"].(string)
-	uid2 := data2["UID"].(string)
+	// Create a second session on the same server
+	sess2 := ts.authMgr.CreateSession("proton")
+	token1 := ts.token
+	uid1 := ts.uid
+	token2 := sess2.AccessToken
+	uid2 := sess2.UID
 
 	// Both tokens should be different
 	if token1 == token2 {
@@ -906,14 +884,13 @@ func TestIntegration_EventIDsAndPagination(t *testing.T) {
 	}
 }
 
-// TestIntegration_LoginResponseJSON verifies the exact JSON structure returned
-// by the login endpoint, ensuring compatibility with all clients.
-func TestIntegration_LoginResponseJSON(t *testing.T) {
+// TestIntegration_AuthInfoResponseJSON verifies the exact JSON structure returned
+// by the auth/info endpoint, ensuring compatibility with all clients.
+func TestIntegration_AuthInfoResponseJSON(t *testing.T) {
 	ts := newTestServer(t)
 
-	resp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth", map[string]string{
+	resp := ts.requestNoAuth(t, http.MethodPost, "/core/v4/auth/info", map[string]string{
 		"Username": "proton",
-		"Password": "proton",
 	})
 
 	// Parse raw JSON to verify exact structure
@@ -929,40 +906,28 @@ func TestIntegration_LoginResponseJSON(t *testing.T) {
 	if _, ok := result["Code"].(float64); !ok {
 		t.Error("Code should be a number")
 	}
-	if _, ok := result["UID"].(string); !ok {
-		t.Error("UID should be a string")
+	if _, ok := result["Modulus"].(string); !ok {
+		t.Error("Modulus should be a string")
 	}
-	if _, ok := result["AccessToken"].(string); !ok {
-		t.Error("AccessToken should be a string")
+	if _, ok := result["ServerEphemeral"].(string); !ok {
+		t.Error("ServerEphemeral should be a string")
 	}
-	if _, ok := result["RefreshToken"].(string); !ok {
-		t.Error("RefreshToken should be a string")
+	if _, ok := result["Version"].(float64); !ok {
+		t.Error("Version should be a number")
 	}
-	if _, ok := result["ExpiresIn"].(float64); !ok {
-		t.Error("ExpiresIn should be a number")
+	if _, ok := result["Salt"].(string); !ok {
+		t.Error("Salt should be a string")
 	}
-	if _, ok := result["TokenType"].(string); !ok {
-		t.Error("TokenType should be a string")
-	}
-	if _, ok := result["Scope"].(string); !ok {
-		t.Error("Scope should be a string")
-	}
-	if _, ok := result["UserID"].(string); !ok {
-		t.Error("UserID should be a string")
+	if _, ok := result["SRPSession"].(string); !ok {
+		t.Error("SRPSession should be a string")
 	}
 
 	// Verify values
 	if result["Code"].(float64) != 1000 {
 		t.Errorf("Code: expected 1000, got %v", result["Code"])
 	}
-	if result["ExpiresIn"].(float64) != 86400 {
-		t.Errorf("ExpiresIn: expected 86400, got %v", result["ExpiresIn"])
-	}
-	if result["TokenType"].(string) != "Bearer" {
-		t.Errorf("TokenType: expected Bearer, got %v", result["TokenType"])
-	}
-	if result["Scope"].(string) != "full" {
-		t.Errorf("Scope: expected full, got %v", result["Scope"])
+	if result["Version"].(float64) != 4 {
+		t.Errorf("Version: expected 4, got %v", result["Version"])
 	}
 }
 

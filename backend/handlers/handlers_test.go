@@ -14,9 +14,11 @@ import (
 )
 
 type testServer struct {
-	handler http.Handler
-	token   string
-	uid     string
+	handler      http.Handler
+	authMgr      *auth.Manager
+	token        string
+	refreshToken string
+	uid          string
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -27,18 +29,18 @@ func newTestServer(t *testing.T) *testServer {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	authMgr := auth.NewManager()
+	authMgr, err := auth.NewManager()
+	if err != nil {
+		t.Fatalf("auth.NewManager: %v", err)
+	}
 	h := handlers.New(s)
 	mux := router.New(h, authMgr)
 	handler := authMgr.Middleware(mux)
 
-	// Authenticate
-	sess, err := authMgr.Authenticate("proton", "proton")
-	if err != nil {
-		t.Fatalf("authenticate: %v", err)
-	}
+	// Create session directly (bypassing SRP for test convenience)
+	sess := authMgr.CreateSession("proton")
 
-	return &testServer{handler: handler, token: sess.AccessToken, uid: sess.UID}
+	return &testServer{handler: handler, authMgr: authMgr, token: sess.AccessToken, refreshToken: sess.RefreshToken, uid: sess.UID}
 }
 
 func (ts *testServer) request(t *testing.T, method, path string, body interface{}) *httptest.ResponseRecorder {
@@ -82,42 +84,57 @@ func parseResponse(t *testing.T, rr *httptest.ResponseRecorder) map[string]inter
 
 // ---------- Auth Tests ----------
 
-func TestAuth_Login(t *testing.T) {
+func TestAuth_LoginEndpoint(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
-	authMgr := auth.NewManager()
+	authMgr, err := auth.NewManager()
+	if err != nil {
+		t.Fatalf("auth.NewManager: %v", err)
+	}
 	h := handlers.New(s)
 	mux := router.New(h, authMgr)
 	handler := authMgr.Middleware(mux)
 
-	body, _ := json.Marshal(map[string]string{"Username": "proton", "Password": "proton"})
-	req := httptest.NewRequest(http.MethodPost, "/core/v4/auth", bytes.NewReader(body))
+	// Test auth/info endpoint first
+	body, _ := json.Marshal(map[string]string{"Username": "proton"})
+	req := httptest.NewRequest(http.MethodPost, "/core/v4/auth/info", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
+		t.Fatalf("auth/info status = %d, want 200", rr.Code)
 	}
-
 	result := parseResponse(t, rr)
-	if result["UID"] == nil || result["UID"].(string) == "" {
-		t.Error("expected UID in response")
+	if result["ServerEphemeral"] == nil || result["ServerEphemeral"].(string) == "" {
+		t.Error("expected ServerEphemeral in response")
 	}
-	if result["AccessToken"] == nil || result["AccessToken"].(string) == "" {
-		t.Error("expected AccessToken in response")
+	if result["Salt"] == nil || result["Salt"].(string) == "" {
+		t.Error("expected Salt in response")
+	}
+	if result["Modulus"] == nil || result["Modulus"].(string) == "" {
+		t.Error("expected Modulus in response")
 	}
 }
 
 func TestAuth_LoginFail(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
-	authMgr := auth.NewManager()
+	authMgr, err := auth.NewManager()
+	if err != nil {
+		t.Fatalf("auth.NewManager: %v", err)
+	}
 	h := handlers.New(s)
 	mux := router.New(h, authMgr)
 	handler := authMgr.Middleware(mux)
 
-	body, _ := json.Marshal(map[string]string{"Username": "proton", "Password": "wrong"})
+	// SRP login with invalid proof should fail
+	body, _ := json.Marshal(map[string]string{
+		"Username":        "proton",
+		"ClientEphemeral": "AAAA",
+		"ClientProof":     "AAAA",
+		"SRPSession":      "nonexistent",
+	})
 	req := httptest.NewRequest(http.MethodPost, "/core/v4/auth", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()

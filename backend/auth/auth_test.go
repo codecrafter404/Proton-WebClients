@@ -5,13 +5,19 @@ import (
 	"time"
 )
 
-func TestAuthenticate_Success(t *testing.T) {
-	m := NewManager()
-
-	sess, err := m.Authenticate("proton", "proton")
+func newTestManager(t *testing.T) *Manager {
+	t.Helper()
+	m, err := NewManager()
 	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
+		t.Fatalf("NewManager: %v", err)
 	}
+	return m
+}
+
+func TestCreateSession_Success(t *testing.T) {
+	m := newTestManager(t)
+
+	sess := m.CreateSession("proton")
 	if sess.UID == "" {
 		t.Error("expected non-empty UID")
 	}
@@ -26,24 +32,10 @@ func TestAuthenticate_Success(t *testing.T) {
 	}
 }
 
-func TestAuthenticate_InvalidCredentials(t *testing.T) {
-	m := NewManager()
-
-	_, err := m.Authenticate("wrong", "wrong")
-	if err == nil {
-		t.Error("expected error for invalid credentials")
-	}
-
-	_, err = m.Authenticate("proton", "wrong")
-	if err == nil {
-		t.Error("expected error for wrong password")
-	}
-}
-
 func TestValidate_ValidToken(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
-	sess, _ := m.Authenticate("proton", "proton")
+	sess := m.CreateSession("proton")
 
 	validated, err := m.Validate(sess.AccessToken)
 	if err != nil {
@@ -55,7 +47,7 @@ func TestValidate_ValidToken(t *testing.T) {
 }
 
 func TestValidate_InvalidToken(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
 	_, err := m.Validate("bogus-token")
 	if err == nil {
@@ -64,9 +56,9 @@ func TestValidate_InvalidToken(t *testing.T) {
 }
 
 func TestValidate_ExpiredToken(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
-	sess, _ := m.Authenticate("proton", "proton")
+	sess := m.CreateSession("proton")
 
 	// Manually expire the session
 	m.mu.Lock()
@@ -80,9 +72,9 @@ func TestValidate_ExpiredToken(t *testing.T) {
 }
 
 func TestRefresh_Success(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
-	sess, _ := m.Authenticate("proton", "proton")
+	sess := m.CreateSession("proton")
 	oldAccess := sess.AccessToken
 	oldRefresh := sess.RefreshToken
 
@@ -111,9 +103,9 @@ func TestRefresh_Success(t *testing.T) {
 }
 
 func TestRefresh_InvalidRefreshToken(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
-	sess, _ := m.Authenticate("proton", "proton")
+	sess := m.CreateSession("proton")
 
 	_, err := m.Refresh(sess.UID, "wrong-refresh-token")
 	if err == nil {
@@ -122,7 +114,7 @@ func TestRefresh_InvalidRefreshToken(t *testing.T) {
 }
 
 func TestRefresh_InvalidUID(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
 	_, err := m.Refresh("nonexistent-uid", "some-token")
 	if err == nil {
@@ -131,9 +123,9 @@ func TestRefresh_InvalidUID(t *testing.T) {
 }
 
 func TestLogout(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
-	sess, _ := m.Authenticate("proton", "proton")
+	sess := m.CreateSession("proton")
 	m.Logout(sess.UID)
 
 	_, err := m.Validate(sess.AccessToken)
@@ -143,10 +135,10 @@ func TestLogout(t *testing.T) {
 }
 
 func TestMultipleSessions(t *testing.T) {
-	m := NewManager()
+	m := newTestManager(t)
 
-	sess1, _ := m.Authenticate("proton", "proton")
-	sess2, _ := m.Authenticate("proton", "proton")
+	sess1 := m.CreateSession("proton")
+	sess2 := m.CreateSession("proton")
 
 	// Both should be valid
 	_, err := m.Validate(sess1.AccessToken)
@@ -163,5 +155,26 @@ func TestMultipleSessions(t *testing.T) {
 	_, err = m.Validate(sess2.AccessToken)
 	if err != nil {
 		t.Error("sess2 should still be valid after sess1 logout")
+	}
+}
+
+func TestSRP_DefaultUser(t *testing.T) {
+	m := newTestManager(t)
+
+	// Verify the SRP server was initialized with the default user
+	if m.SRP == nil {
+		t.Fatal("SRP server is nil")
+	}
+
+	// Should be able to get auth info for the default "proton" user
+	serverEph, salt, version, session, err := m.SRP.GetAuthInfo("proton")
+	if err != nil {
+		t.Fatalf("GetAuthInfo: %v", err)
+	}
+	if serverEph == "" || salt == "" || session == "" {
+		t.Fatal("empty auth info fields")
+	}
+	if version != 4 {
+		t.Fatalf("expected version 4, got %d", version)
 	}
 }
