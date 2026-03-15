@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: calendar-db
+  namespace: proton-calendar
+  labels:
+    app.kubernetes.io/name: proton-calendar
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Uncomment and set storageClassName for your cluster:
+  # storageClassName: standard

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: calendar-api
+  namespace: proton-calendar
+  labels:
+    app.kubernetes.io/name: proton-calendar
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: proton-calendar
+    app.kubernetes.io/component: api
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http

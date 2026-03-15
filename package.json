@@ -3,14 +3,8 @@
     "private": true,
     "license": "GPL-3.0",
     "workspaces": [
-        "applications/*",
-        "applications/pass-desktop/native",
+        "applications/calendar",
         "packages/*",
-        "packages/wasm/*",
-        "tests",
-        "tests/mail-renderer",
-        "tests/packages/*",
-        "utilities/*",
         "vendor/*/*"
     ],
     "scripts": {

@@ -1,8 +1,0 @@
-@use '~@proton/styles/scss/lib/em' as *;
-
-.pass-card-icon {
-	color: var(--text-invert);
-	background-color: var(--pass-card-color, var(--pass-card-color));
-	block-size: em(25);
-	inline-size: em(25);
-}
