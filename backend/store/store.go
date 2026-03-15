@@ -353,20 +353,36 @@ func (s *Store) UpdateCalendar(calendarID string, args models.CalendarUpdateArgu
 	}
 
 	if args.Name != nil {
-		s.db.Exec("UPDATE calendars SET name=? WHERE id=?", *args.Name, calendarID)
-		s.db.Exec("UPDATE calendar_members SET name=? WHERE calendar_id=?", *args.Name, calendarID)
+		if _, err := s.db.Exec("UPDATE calendars SET name=? WHERE id=?", *args.Name, calendarID); err != nil {
+			return nil, fmt.Errorf("update calendar name: %w", err)
+		}
+		if _, err := s.db.Exec("UPDATE calendar_members SET name=? WHERE calendar_id=?", *args.Name, calendarID); err != nil {
+			return nil, fmt.Errorf("update member name: %w", err)
+		}
 	}
 	if args.Description != nil {
-		s.db.Exec("UPDATE calendars SET description=? WHERE id=?", *args.Description, calendarID)
-		s.db.Exec("UPDATE calendar_members SET description=? WHERE calendar_id=?", *args.Description, calendarID)
+		if _, err := s.db.Exec("UPDATE calendars SET description=? WHERE id=?", *args.Description, calendarID); err != nil {
+			return nil, fmt.Errorf("update calendar description: %w", err)
+		}
+		if _, err := s.db.Exec("UPDATE calendar_members SET description=? WHERE calendar_id=?", *args.Description, calendarID); err != nil {
+			return nil, fmt.Errorf("update member description: %w", err)
+		}
 	}
 	if args.Color != nil {
-		s.db.Exec("UPDATE calendars SET color=? WHERE id=?", *args.Color, calendarID)
-		s.db.Exec("UPDATE calendar_members SET color=? WHERE calendar_id=?", *args.Color, calendarID)
+		if _, err := s.db.Exec("UPDATE calendars SET color=? WHERE id=?", *args.Color, calendarID); err != nil {
+			return nil, fmt.Errorf("update calendar color: %w", err)
+		}
+		if _, err := s.db.Exec("UPDATE calendar_members SET color=? WHERE calendar_id=?", *args.Color, calendarID); err != nil {
+			return nil, fmt.Errorf("update member color: %w", err)
+		}
 	}
 	if args.Display != nil {
-		s.db.Exec("UPDATE calendars SET display=? WHERE id=?", *args.Display, calendarID)
-		s.db.Exec("UPDATE calendar_members SET display=? WHERE calendar_id=?", *args.Display, calendarID)
+		if _, err := s.db.Exec("UPDATE calendars SET display=? WHERE id=?", *args.Display, calendarID); err != nil {
+			return nil, fmt.Errorf("update calendar display: %w", err)
+		}
+		if _, err := s.db.Exec("UPDATE calendar_members SET display=? WHERE calendar_id=?", *args.Display, calendarID); err != nil {
+			return nil, fmt.Errorf("update member display: %w", err)
+		}
 	}
 
 	return s.GetCalendar(calendarID)
@@ -673,7 +689,9 @@ func (s *Store) UpdateEvent(calendarID, eventID string, data models.CreateOrUpda
 
 	// Replace attendees
 	if data.Attendees != nil {
-		tx.Exec("DELETE FROM attendees WHERE event_id=?", eventID)
+		if _, err := tx.Exec("DELETE FROM attendees WHERE event_id=?", eventID); err != nil {
+			return nil, fmt.Errorf("delete attendees: %w", err)
+		}
 		for _, a := range data.Attendees {
 			attID := newID()
 			if _, err := tx.Exec("INSERT INTO attendees (id, event_id, token, status) VALUES (?,?,?,?)",
@@ -845,15 +863,21 @@ func (s *Store) UpdateCalendarSettings(calendarID string, update models.Calendar
 	}
 
 	if update.DefaultEventDuration != nil {
-		s.db.Exec("UPDATE calendar_settings SET default_event_duration=? WHERE calendar_id=?", *update.DefaultEventDuration, calendarID)
+		if _, err := s.db.Exec("UPDATE calendar_settings SET default_event_duration=? WHERE calendar_id=?", *update.DefaultEventDuration, calendarID); err != nil {
+			return nil, fmt.Errorf("update default_event_duration: %w", err)
+		}
 	}
 	if update.DefaultPartDayNotifications != nil {
 		b, _ := json.Marshal(update.DefaultPartDayNotifications)
-		s.db.Exec("UPDATE calendar_settings SET default_part_day_notifications=? WHERE calendar_id=?", string(b), calendarID)
+		if _, err := s.db.Exec("UPDATE calendar_settings SET default_part_day_notifications=? WHERE calendar_id=?", string(b), calendarID); err != nil {
+			return nil, fmt.Errorf("update default_part_day_notifications: %w", err)
+		}
 	}
 	if update.DefaultFullDayNotifications != nil {
 		b, _ := json.Marshal(update.DefaultFullDayNotifications)
-		s.db.Exec("UPDATE calendar_settings SET default_full_day_notifications=? WHERE calendar_id=?", string(b), calendarID)
+		if _, err := s.db.Exec("UPDATE calendar_settings SET default_full_day_notifications=? WHERE calendar_id=?", string(b), calendarID); err != nil {
+			return nil, fmt.Errorf("update default_full_day_notifications: %w", err)
+		}
 	}
 
 	return s.GetCalendarSettings(calendarID)
@@ -875,34 +899,54 @@ func (s *Store) GetUserSettings() (*models.CalendarUserSettings, error) {
 
 func (s *Store) UpdateUserSettings(update models.CalendarUserSettingsUpdate) (*models.CalendarUserSettings, error) {
 	if update.DefaultCalendarID != nil {
-		s.db.Exec("UPDATE user_settings SET default_calendar_id=? WHERE id=1", *update.DefaultCalendarID)
+		if _, err := s.db.Exec("UPDATE user_settings SET default_calendar_id=? WHERE id=1", *update.DefaultCalendarID); err != nil {
+			return nil, fmt.Errorf("update default_calendar_id: %w", err)
+		}
 	}
 	if update.WeekLength != nil {
-		s.db.Exec("UPDATE user_settings SET week_length=? WHERE id=1", *update.WeekLength)
+		if _, err := s.db.Exec("UPDATE user_settings SET week_length=? WHERE id=1", *update.WeekLength); err != nil {
+			return nil, fmt.Errorf("update week_length: %w", err)
+		}
 	}
 	if update.DisplayWeekNumber != nil {
-		s.db.Exec("UPDATE user_settings SET display_week_number=? WHERE id=1", *update.DisplayWeekNumber)
+		if _, err := s.db.Exec("UPDATE user_settings SET display_week_number=? WHERE id=1", *update.DisplayWeekNumber); err != nil {
+			return nil, fmt.Errorf("update display_week_number: %w", err)
+		}
 	}
 	if update.AutoDetectPrimaryTimezone != nil {
-		s.db.Exec("UPDATE user_settings SET auto_detect_primary_tz=? WHERE id=1", *update.AutoDetectPrimaryTimezone)
+		if _, err := s.db.Exec("UPDATE user_settings SET auto_detect_primary_tz=? WHERE id=1", *update.AutoDetectPrimaryTimezone); err != nil {
+			return nil, fmt.Errorf("update auto_detect_primary_tz: %w", err)
+		}
 	}
 	if update.PrimaryTimezone != nil {
-		s.db.Exec("UPDATE user_settings SET primary_timezone=? WHERE id=1", *update.PrimaryTimezone)
+		if _, err := s.db.Exec("UPDATE user_settings SET primary_timezone=? WHERE id=1", *update.PrimaryTimezone); err != nil {
+			return nil, fmt.Errorf("update primary_timezone: %w", err)
+		}
 	}
 	if update.DisplaySecondaryTimezone != nil {
-		s.db.Exec("UPDATE user_settings SET display_secondary_tz=? WHERE id=1", *update.DisplaySecondaryTimezone)
+		if _, err := s.db.Exec("UPDATE user_settings SET display_secondary_tz=? WHERE id=1", *update.DisplaySecondaryTimezone); err != nil {
+			return nil, fmt.Errorf("update display_secondary_tz: %w", err)
+		}
 	}
 	if update.SecondaryTimezone != nil {
-		s.db.Exec("UPDATE user_settings SET secondary_timezone=? WHERE id=1", *update.SecondaryTimezone)
+		if _, err := s.db.Exec("UPDATE user_settings SET secondary_timezone=? WHERE id=1", *update.SecondaryTimezone); err != nil {
+			return nil, fmt.Errorf("update secondary_timezone: %w", err)
+		}
 	}
 	if update.ViewPreference != nil {
-		s.db.Exec("UPDATE user_settings SET view_preference=? WHERE id=1", *update.ViewPreference)
+		if _, err := s.db.Exec("UPDATE user_settings SET view_preference=? WHERE id=1", *update.ViewPreference); err != nil {
+			return nil, fmt.Errorf("update view_preference: %w", err)
+		}
 	}
 	if update.InviteLocale != nil {
-		s.db.Exec("UPDATE user_settings SET invite_locale=? WHERE id=1", *update.InviteLocale)
+		if _, err := s.db.Exec("UPDATE user_settings SET invite_locale=? WHERE id=1", *update.InviteLocale); err != nil {
+			return nil, fmt.Errorf("update invite_locale: %w", err)
+		}
 	}
 	if update.AutoImportInvite != nil {
-		s.db.Exec("UPDATE user_settings SET auto_import_invite=? WHERE id=1", *update.AutoImportInvite)
+		if _, err := s.db.Exec("UPDATE user_settings SET auto_import_invite=? WHERE id=1", *update.AutoImportInvite); err != nil {
+			return nil, fmt.Errorf("update auto_import_invite: %w", err)
+		}
 	}
 	return s.GetUserSettings()
 }
@@ -1004,19 +1048,29 @@ func (s *Store) UpdateMember(calendarID, memberID string, data models.UpdateCale
 	}
 
 	if data.Permissions != 0 {
-		s.db.Exec("UPDATE calendar_members SET permissions=? WHERE id=?", data.Permissions, memberID)
+		if _, err := s.db.Exec("UPDATE calendar_members SET permissions=? WHERE id=?", data.Permissions, memberID); err != nil {
+			return nil, fmt.Errorf("update member permissions: %w", err)
+		}
 	}
 	if data.Name != "" {
-		s.db.Exec("UPDATE calendar_members SET name=? WHERE id=?", data.Name, memberID)
+		if _, err := s.db.Exec("UPDATE calendar_members SET name=? WHERE id=?", data.Name, memberID); err != nil {
+			return nil, fmt.Errorf("update member name: %w", err)
+		}
 	}
 	if data.Description != "" {
-		s.db.Exec("UPDATE calendar_members SET description=? WHERE id=?", data.Description, memberID)
+		if _, err := s.db.Exec("UPDATE calendar_members SET description=? WHERE id=?", data.Description, memberID); err != nil {
+			return nil, fmt.Errorf("update member description: %w", err)
+		}
 	}
 	if data.Color != "" {
-		s.db.Exec("UPDATE calendar_members SET color=? WHERE id=?", data.Color, memberID)
+		if _, err := s.db.Exec("UPDATE calendar_members SET color=? WHERE id=?", data.Color, memberID); err != nil {
+			return nil, fmt.Errorf("update member color: %w", err)
+		}
 	}
 	if data.Display != 0 {
-		s.db.Exec("UPDATE calendar_members SET display=? WHERE id=?", data.Display, memberID)
+		if _, err := s.db.Exec("UPDATE calendar_members SET display=? WHERE id=?", data.Display, memberID); err != nil {
+			return nil, fmt.Errorf("update member display: %w", err)
+		}
 	}
 
 	var m models.CalendarMember
