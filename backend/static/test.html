@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendar API Test</title>
+    <style>
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body { max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #6d4aff; border-bottom: 2px solid #6d4aff; padding-bottom: 10px; }
+        .card { background: white; border-radius: 8px; padding: 16px; margin: 10px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+        .status { padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; display: inline-block; }
+        .status.pass { background: #d4edda; color: #155724; }
+        .status.fail { background: #f8d7da; color: #721c24; }
+        pre { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; max-height: 300px; }
+        button { background: #6d4aff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+        button:hover { background: #5b3bd4; }
+        #progress { margin: 10px 0; }
+        .test-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; }
+        .test-row:last-child { border-bottom: none; }
+        .test-name { flex: 1; font-weight: 500; }
+        .summary { font-size: 18px; font-weight: 600; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>Proton Calendar Backend API Test Suite</h1>
+    <p>Testing Go backend at <code>http://localhost:8080</code></p>
+    <button onclick="runTests()">Run All Tests</button>
+    <div id="progress"></div>
+    <div id="summary" class="summary"></div>
+    <div id="results"></div>
+
+    <script>
+    let token = '', uid = '', calId = '', eventId = '', alarmId = '', memberId = '', attendeeId = '';
+    const results = [];
+
+    async function api(method, path, body) {
+        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        if (token) { opts.headers['Authorization'] = 'Bearer ' + token; opts.headers['x-pm-uid'] = uid; }
+        if (body) opts.body = JSON.stringify(body);
+        const resp = await fetch(path, opts);
+        return { status: resp.status, data: await resp.json() };
+    }
+
+    function addResult(name, passed) {
+        results.push({ name, passed });
+        renderResults();
+    }
+
+    function renderResults() {
+        document.getElementById('results').innerHTML = results.map(r =>
+            '<div class="test-row"><span class="status ' + (r.passed ? 'pass' : 'fail') + '">' +
+            (r.passed ? 'PASS' : 'FAIL') + '</span><span class="test-name">' + r.name + '</span></div>'
+        ).join('');
+    }
+
+    function updateProgress(msg) {
+        document.getElementById('progress').innerHTML = '<em>' + msg + '</em>';
+    }
+
+    async function runTests() {
+        results.length = 0;
+        document.getElementById('results').innerHTML = '';
+        document.getElementById('summary').innerHTML = '';
+
+        updateProgress('Testing authentication...');
+        let r = await api('POST', '/core/v4/auth', { Username: 'proton', Password: 'proton' });
+        token = r.data.AccessToken; uid = r.data.UID;
+        addResult('POST /core/v4/auth (Login)', r.status === 200 && r.data.Code === 1000 && !!token);
+
+        r = await api('POST', '/core/v4/auth', { Username: 'bad', Password: 'bad' });
+        addResult('POST /core/v4/auth (Bad credentials)', r.status === 401);
+
+        const savedToken = token; token = '';
+        r = await api('GET', '/calendar/v1');
+        token = savedToken;
+        addResult('GET /calendar/v1 (No auth)', r.status === 401);
+
+        updateProgress('Testing calendar CRUD...');
+        r = await api('POST', '/calendar/v1', { Name: 'Work', Color: '#657ee4', AddressID: 'me@proton.me', Display: 1 });
+        calId = r.data.Calendar && r.data.Calendar.ID;
+        addResult('POST /calendar/v1 (Create calendar)', r.status === 200 && !!calId);
+
+        r = await api('GET', '/calendar/v1/' + calId);
+        addResult('GET /calendar/v1/{id} (Get calendar)', r.status === 200 && r.data.Calendar && r.data.Calendar.ID === calId);
+
+        r = await api('GET', '/calendar/v1');
+        addResult('GET /calendar/v1 (List calendars)', r.status === 200 && r.data.Calendars && r.data.Calendars.length >= 1);
+
+        r = await api('PUT', '/calendar/v1/' + calId, { Name: 'Personal', Color: '#f44336' });
+        addResult('PUT /calendar/v1/{id} (Update calendar)', r.status === 200);
+
+        updateProgress('Testing calendar settings...');
+        r = await api('GET', '/calendar/v1/' + calId + '/settings');
+        addResult('GET .../settings (Get settings)', r.status === 200 && r.data.CalendarSettings && r.data.CalendarSettings.DefaultEventDuration === 1800);
+
+        r = await api('PUT', '/calendar/v1/' + calId + '/settings', {
+            DefaultEventDuration: 3600,
+            DefaultPartDayNotifications: [{ Type: 1, Trigger: '-PT30M' }],
+            DefaultFullDayNotifications: [{ Type: 0, Trigger: '-PT1H' }]
+        });
+        addResult('PUT .../settings (Update settings)', r.status === 200 && r.data.CalendarSettings && r.data.CalendarSettings.DefaultEventDuration === 3600);
+
+        r = await api('GET', '/settings/calendar');
+        addResult('GET /settings/calendar (User settings)', r.status === 200 && r.data.CalendarUserSettings && !!r.data.CalendarUserSettings.PrimaryTimezone);
+
+        r = await api('PUT', '/settings/calendar', { PrimaryTimezone: 'Europe/Berlin', WeekLength: 5 });
+        addResult('PUT /settings/calendar (Update user settings)', r.status === 200 && r.data.CalendarUserSettings && r.data.CalendarUserSettings.PrimaryTimezone === 'Europe/Berlin');
+
+        updateProgress('Testing event operations...');
+        var now = Math.floor(Date.now() / 1000);
+        r = await api('PUT', '/calendar/v1/' + calId + '/events/sync', {
+            MemberID: 'm1',
+            Events: [{
+                Event: {
+                    Permissions: 127, StartTime: now, EndTime: now + 3600,
+                    StartTimezone: 'Europe/Berlin', EndTimezone: 'Europe/Berlin',
+                    UID: 'test-event-1@local',
+                    Notifications: [{ Type: 1, Trigger: '-PT15M' }, { Type: 0, Trigger: '-PT1H' }],
+                    Attendees: [{ Token: 'alice@example.com', Status: 0 }, { Token: 'bob@example.com', Status: 1 }]
+                }
+            }]
+        });
+        eventId = r.data.Responses && r.data.Responses[0] && r.data.Responses[0].Response && r.data.Responses[0].Response.Event && r.data.Responses[0].Response.Event.ID;
+        addResult('PUT .../events/sync (Create event)', r.status === 200 && !!eventId);
+
+        r = await api('GET', '/calendar/v1/' + calId + '/events/' + eventId);
+        addResult('GET .../events/{eid} (Get event)', r.status === 200 && r.data.Event && r.data.Event.UID === 'test-event-1@local');
+
+        r = await api('GET', '/calendar/v1/' + calId + '/events?Start=' + (now - 100) + '&End=' + (now + 7200));
+        addResult('GET .../events?Start&End (List events)', r.status === 200 && r.data.Events && r.data.Events.length >= 1);
+
+        r = await api('GET', '/calendar/v1/events?UID=test-event-1@local');
+        addResult('GET /calendar/v1/events?UID (By UID)', r.status === 200 && r.data.Events && r.data.Events.length >= 1 && r.data.Events[0].UID === 'test-event-1@local');
+
+        r = await api('GET', '/calendar/v1/' + calId + '/events/count');
+        addResult('GET .../events/count', r.status === 200 && r.data.Total >= 1);
+
+        r = await api('GET', '/calendar/v1/' + calId + '/events/ids');
+        addResult('GET .../events/ids', r.status === 200 && r.data.IDs && r.data.IDs.length >= 1);
+
+        updateProgress('Testing alarms (before event update)...');
+        r = await api('GET', '/calendar/v1/' + calId + '/alarms?Start=0&End=9999999999');
+        alarmId = r.data.Alarms && r.data.Alarms[0] && r.data.Alarms[0].ID;
+        addResult('GET .../alarms (List alarms)', r.status === 200 && r.data.Alarms && r.data.Alarms.length >= 1);
+
+        if (alarmId) {
+            r = await api('GET', '/calendar/v1/' + calId + '/alarms/' + alarmId);
+            addResult('GET .../alarms/{aid} (Get alarm)', r.status === 200 && r.data.Alarm && r.data.Alarm.ID === alarmId);
+        }
+
+        updateProgress('Testing event update...');
+        r = await api('PUT', '/calendar/v1/' + calId + '/events/sync', {
+            MemberID: 'm1', Events: [{ ID: eventId, Event: { Permissions: 127, StartTime: now + 1000, EndTime: now + 4600, StartTimezone: 'America/New_York', EndTimezone: 'America/New_York' } }]
+        });
+        addResult('PUT .../events/sync (Update event)', r.status === 200);
+
+        r = await api('PUT', '/calendar/v1/' + calId + '/events/' + eventId + '/personal', {
+            Color: '#ff5722', Notifications: [{ Type: 1, Trigger: '-PT5M' }]
+        });
+        addResult('PUT .../events/{eid}/personal', r.status === 200);
+
+        updateProgress('Testing attendees...');
+        r = await api('GET', '/calendar/v1/' + calId + '/events/' + eventId + '/attendees');
+        attendeeId = r.data.Attendees && r.data.Attendees[0] && r.data.Attendees[0].ID;
+        addResult('GET .../attendees', r.status === 200 && r.data.Attendees && r.data.Attendees.length >= 1);
+
+        if (attendeeId) {
+            r = await api('PUT', '/calendar/v1/' + calId + '/events/' + eventId + '/attendees/' + attendeeId, { Status: 2 });
+            addResult('PUT .../attendees/{aid} (Update)', r.status === 200);
+        }
+
+        updateProgress('Testing timezones...');
+        r = await api('GET', '/calendar/v1/timezones');
+        addResult('GET /calendar/v1/timezones', r.status === 200 && r.data.Timezones && r.data.Timezones.length > 100);
+
+        updateProgress('Testing members...');
+        r = await api('GET', '/calendar/v1/' + calId + '/members');
+        addResult('GET .../members', r.status === 200 && r.data.Members && r.data.Members.length >= 1);
+
+        r = await api('POST', '/calendar/v1/' + calId + '/members', { Email: 'other@proton.me', Permissions: 63 });
+        memberId = r.data.Member && r.data.Member.ID;
+        addResult('POST .../members (Add)', r.status === 200 && !!memberId);
+
+        r = await api('PUT', '/calendar/v1/' + calId + '/members/' + memberId, { Name: 'Updated', Color: '#00bcd4' });
+        addResult('PUT .../members/{mid} (Update)', r.status === 200);
+
+        r = await api('DELETE', '/calendar/v1/' + calId + '/members/' + memberId);
+        addResult('DELETE .../members/{mid}', r.status === 200);
+
+        r = await api('PUT', '/calendar/v1/' + calId + '/events/sync', { MemberID: 'm1', Events: [{ ID: eventId }] });
+        addResult('PUT .../events/sync (Delete event)', r.status === 200);
+
+        r = await api('DELETE', '/calendar/v1/' + calId);
+        addResult('DELETE /calendar/v1/{id}', r.status === 200);
+
+        r = await api('GET', '/calendar/v1/' + calId);
+        addResult('GET /calendar/v1/{id} (Verify deleted)', r.status === 404);
+
+        updateProgress('Testing token refresh...');
+        var loginR = await api('POST', '/core/v4/auth', { Username: 'proton', Password: 'proton' });
+        var rt = loginR.data.RefreshToken;
+        var tempUid = loginR.data.UID;
+        r = await fetch('/auth/refresh', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ UID: tempUid, RefreshToken: rt })
+        }).then(function(resp) { return resp.json(); });
+        addResult('POST /auth/refresh (Token refresh)', r.Code === 1000 && !!r.AccessToken);
+
+        var passed = results.filter(function(r) { return r.passed; }).length;
+        var total = results.length;
+        updateProgress('');
+        document.getElementById('summary').innerHTML =
+            '<span style="color:' + (passed === total ? '#155724' : '#721c24') + '">' + passed + '/' + total + ' tests passed</span>';
+    }
+    </script>
+</body>
+</html>

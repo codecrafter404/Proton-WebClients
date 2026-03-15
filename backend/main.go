@@ -31,10 +31,15 @@ func main() {
 	handler := authMgr.Middleware(mux)
 	handler = corsMiddleware(handler)
 
+	// Serve static test page at /static/
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	http.Handle("/", handler)
+
 	fmt.Printf("Calendar API server listening on %s\n", *addr)
 	fmt.Println("Default credentials: proton / proton")
 	fmt.Println("Login: POST /core/v4/auth {\"Username\":\"proton\",\"Password\":\"proton\"}")
-	log.Fatal(http.ListenAndServe(*addr, handler))
+	fmt.Println("Test UI: http://localhost" + *addr + "/static/test.html")
+	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
 // corsMiddleware adds CORS headers to allow the frontend to communicate.
