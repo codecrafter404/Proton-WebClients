@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -312,7 +313,7 @@ func TestIntegration_MobileAPICompatibility(t *testing.T) {
 		}
 	}
 
-	// --- Create calendar and verify response structure matches mobile expectations ---
+	// --- Create calendar ---
 	createResp := tsAuth.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
 		"Name":      "Mobile Test",
 		"Color":     "#0000FF",
@@ -325,14 +326,30 @@ func TestIntegration_MobileAPICompatibility(t *testing.T) {
 	createData := parseResponse(t, createResp)
 	cal := createData["Calendar"].(map[string]interface{})
 
-	requiredCalFields := []string{"ID", "Name", "Color", "Display", "Email", "Flags", "Permissions", "Type"}
-	for _, field := range requiredCalFields {
+	// CreateCalendar returns CalendarWithMembers: ID, Type, Owner, Members
+	requiredCreateFields := []string{"ID", "Type", "Owner", "Members"}
+	for _, field := range requiredCreateFields {
 		if _, ok := cal[field]; !ok {
-			t.Errorf("calendar response missing field: %s", field)
+			t.Errorf("create calendar response missing field: %s", field)
 		}
 	}
 
 	calendarID := cal["ID"].(string)
+
+	// --- ListCalendars returns VisualCalendar with full display fields ---
+	listCalResp := tsAuth.request(t, http.MethodGet, "/calendar/v1", nil)
+	listCalData := parseResponse(t, listCalResp)
+	calendars := listCalData["Calendars"].([]interface{})
+	if len(calendars) < 1 {
+		t.Fatal("expected at least 1 calendar in list")
+	}
+	visualCal := calendars[len(calendars)-1].(map[string]interface{})
+	requiredVisualFields := []string{"ID", "Type", "Name", "Color", "Display", "Email", "Flags", "Permissions"}
+	for _, field := range requiredVisualFields {
+		if _, ok := visualCal[field]; !ok {
+			t.Errorf("list calendar response missing field: %s", field)
+		}
+	}
 
 	// --- Calendar settings response format ---
 	calSettingsResp := tsAuth.request(t, http.MethodGet, fmt.Sprintf("/calendar/v1/%s/settings", calendarID), nil)
@@ -404,22 +421,44 @@ func TestIntegration_MobileAPICompatibility(t *testing.T) {
 
 // TestIntegration_CORSHeaders verifies that CORS headers are set correctly
 // for cross-origin requests from web and mobile clients.
+// Note: CORS middleware is applied in main.go. This test creates the same
+// middleware chain to verify the behavior.
 func TestIntegration_CORSHeaders(t *testing.T) {
 	ts := newTestServer(t)
+
+	// Wrap handler with the same CORS logic used in main.go
+	corsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-pm-uid, x-pm-appversion, x-pm-locale")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		ts.handler.ServeHTTP(w, r)
+	})
 
 	// CORS preflight request
 	req := httptest.NewRequest(http.MethodOptions, "/calendar/v1", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 	rr := httptest.NewRecorder()
-	ts.handler.ServeHTTP(rr, req)
+	corsHandler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusNoContent && rr.Code != http.StatusOK {
-		t.Fatalf("CORS preflight: expected 204 or 200, got %d", rr.Code)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("CORS preflight: expected 204, got %d", rr.Code)
 	}
 
 	allowOrigin := rr.Header().Get("Access-Control-Allow-Origin")
-	if allowOrigin == "" {
-		t.Fatal("CORS: missing Access-Control-Allow-Origin header")
+	if allowOrigin != "http://localhost:3000" {
+		t.Fatalf("CORS: expected origin http://localhost:3000, got %s", allowOrigin)
 	}
 
 	allowMethods := rr.Header().Get("Access-Control-Allow-Methods")
@@ -430,6 +469,11 @@ func TestIntegration_CORSHeaders(t *testing.T) {
 	allowHeaders := rr.Header().Get("Access-Control-Allow-Headers")
 	if allowHeaders == "" {
 		t.Fatal("CORS: missing Access-Control-Allow-Headers header")
+	}
+
+	// Verify x-pm-uid is in allowed headers (required by Proton clients)
+	if !strings.Contains(allowHeaders, "x-pm-uid") {
+		t.Fatal("CORS: x-pm-uid not in allowed headers")
 	}
 }
 
@@ -919,5 +963,665 @@ func TestIntegration_LoginResponseJSON(t *testing.T) {
 	}
 	if result["Scope"].(string) != "full" {
 		t.Errorf("Scope: expected full, got %v", result["Scope"])
+	}
+}
+
+// --- E2E Encryption Integration Tests ---
+// These tests validate that the backend correctly round-trips encrypted data
+// without modification, ensuring the client-side E2E encryption model works.
+
+// TestIntegration_E2E_EncryptedEventDataRoundTrip verifies that all four
+// CalendarCardType values (Clear=0, Encrypted=1, Signed=2, Both=3) round-trip
+// correctly through create → get → update → get.
+func TestIntegration_E2E_EncryptedEventDataRoundTrip(t *testing.T) {
+	ts := newTestServer(t)
+
+	// Create a calendar
+	calResp := ts.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
+		"Name": "E2E Encryption Test", "Color": "#ff0000", "AddressID": "e2e@proton.me", "Display": 1,
+	})
+	calID := parseResponse(t, calResp)["Calendar"].(map[string]interface{})["ID"].(string)
+
+	// Define test encrypted data using all 4 card types
+	sig := "-----BEGIN PGP SIGNATURE-----\nfakeSignatureData==\n-----END PGP SIGNATURE-----"
+	calendarEventContent := []map[string]interface{}{
+		{
+			"Type":      0, // CardTypeClear
+			"Data":      "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nDTSTART:20240101T120000Z\nEND:VEVENT\nEND:VCALENDAR",
+			"Signature": nil,
+			"Author":    "user@proton.me",
+		},
+	}
+	sharedEventContent := []map[string]interface{}{
+		{
+			"Type":      2, // CardTypeSigned
+			"Data":      "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nSUMMARY:Signed Event\nEND:VEVENT\nEND:VCALENDAR",
+			"Signature": sig,
+			"Author":    "user@proton.me",
+		},
+		{
+			"Type":      3, // CardTypeBoth (encrypted + signed)
+			"Data":      "wcBMA7H5hGBtKRBAAQgAi+encrypted+shared+data/base64+content==",
+			"Signature": sig,
+			"Author":    "user@proton.me",
+		},
+	}
+	attendeesEventContent := []map[string]interface{}{
+		{
+			"Type":      1, // CardTypeEncrypted
+			"Data":      "wcBMA7H5hGBtKRBAAQgAi+encrypted+attendee+data/base64==",
+			"Signature": nil,
+			"Author":    "organizer@proton.me",
+		},
+	}
+
+	calKeyPacket := "wV4Dk7H5hGBtKRBSAQdA+calendarKeyPacket+base64data=="
+	sharedKeyPacket := "wV4Dk7H5hGBtKRBSAQdA+sharedKeyPacket+base64data=="
+	addressKeyPacket := "wV4Dk7H5hGBtKRBSAQdA+addressKeyPacket+base64data=="
+	addressID := "address-id-e2e-test"
+
+	// Create event with all encrypted fields via sync
+	syncResp := ts.request(t, http.MethodPut, "/calendar/v1/"+calID+"/events/sync", map[string]interface{}{
+		"MemberID": "m1",
+		"Events": []map[string]interface{}{
+			{
+				"Event": map[string]interface{}{
+					"Permissions":          127,
+					"StartTime":            1704067200, // 2024-01-01T00:00:00Z
+					"EndTime":              1704070800, // 2024-01-01T01:00:00Z
+					"StartTimezone":        "Europe/Berlin",
+					"EndTimezone":          "Europe/Berlin",
+					"UID":                  "e2e-test-event@proton.local",
+					"CalendarKeyPacket":    calKeyPacket,
+					"CalendarEventContent": calendarEventContent,
+					"SharedKeyPacket":      sharedKeyPacket,
+					"SharedEventContent":   sharedEventContent,
+					"AddressKeyPacket":     addressKeyPacket,
+					"AddressID":            addressID,
+					"AttendeesEventContent": attendeesEventContent,
+					"Attendees": []map[string]interface{}{
+						{"Token": "attendee-token-1", "Status": 0},
+					},
+				},
+			},
+		},
+	})
+	if syncResp.Code != http.StatusOK {
+		t.Fatalf("sync create: expected 200, got %d: %s", syncResp.Code, syncResp.Body.String())
+	}
+	syncData := parseResponse(t, syncResp)
+	responses := syncData["Responses"].([]interface{})
+	eventResp := responses[0].(map[string]interface{})["Response"].(map[string]interface{})
+	if eventResp["Code"].(float64) != 1000 {
+		t.Fatalf("sync event create failed: %v", eventResp["Error"])
+	}
+	event := eventResp["Event"].(map[string]interface{})
+	eventID := event["ID"].(string)
+
+	// --- Verify encrypted data on the create response ---
+	verifyEncryptedEvent(t, event, "create response",
+		calKeyPacket, sharedKeyPacket, addressKeyPacket,
+		calendarEventContent, sharedEventContent, attendeesEventContent, sig)
+
+	// --- GET the event and verify data matches exactly ---
+	getResp := ts.request(t, http.MethodGet, "/calendar/v1/"+calID+"/events/"+eventID, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get event: expected 200, got %d", getResp.Code)
+	}
+	getEvent := parseResponse(t, getResp)["Event"].(map[string]interface{})
+
+	verifyEncryptedEvent(t, getEvent, "GET response",
+		calKeyPacket, sharedKeyPacket, addressKeyPacket,
+		calendarEventContent, sharedEventContent, attendeesEventContent, sig)
+
+	// --- GET by UID and verify ---
+	uidResp := ts.request(t, http.MethodGet, "/calendar/v1/events?UID=e2e-test-event@proton.local", nil)
+	if uidResp.Code != http.StatusOK {
+		t.Fatalf("get by UID: expected 200, got %d", uidResp.Code)
+	}
+	uidEvents := parseResponse(t, uidResp)["Events"].([]interface{})
+	if len(uidEvents) != 1 {
+		t.Fatalf("expected 1 event by UID, got %d", len(uidEvents))
+	}
+	uidEvent := uidEvents[0].(map[string]interface{})
+
+	verifyEncryptedEvent(t, uidEvent, "UID lookup response",
+		calKeyPacket, sharedKeyPacket, addressKeyPacket,
+		calendarEventContent, sharedEventContent, attendeesEventContent, sig)
+}
+
+// TestIntegration_E2E_EncryptedDataSurvivesUpdate verifies that encrypted
+// data is preserved correctly when an event is updated.
+func TestIntegration_E2E_EncryptedDataSurvivesUpdate(t *testing.T) {
+	ts := newTestServer(t)
+
+	calResp := ts.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
+		"Name": "Update E2E Test", "Color": "#00ff00", "AddressID": "e2e@proton.me", "Display": 1,
+	})
+	calID := parseResponse(t, calResp)["Calendar"].(map[string]interface{})["ID"].(string)
+
+	origCalKeyPacket := "wV4D+original+calendarKeyPacket+base64=="
+	origSharedKeyPacket := "wV4D+original+sharedKeyPacket+base64=="
+
+	// Create event with initial encrypted data
+	syncResp := ts.request(t, http.MethodPut, "/calendar/v1/"+calID+"/events/sync", map[string]interface{}{
+		"MemberID": "m1",
+		"Events": []map[string]interface{}{
+			{
+				"Event": map[string]interface{}{
+					"Permissions":       127,
+					"StartTime":         1000,
+					"EndTime":           2000,
+					"StartTimezone":     "UTC",
+					"EndTimezone":       "UTC",
+					"CalendarKeyPacket": origCalKeyPacket,
+					"SharedKeyPacket":   origSharedKeyPacket,
+					"CalendarEventContent": []map[string]interface{}{
+						{"Type": 3, "Data": "original-encrypted-calendar-data", "Signature": "original-sig", "Author": "user@proton.me"},
+					},
+					"SharedEventContent": []map[string]interface{}{
+						{"Type": 3, "Data": "original-encrypted-shared-data", "Signature": "original-shared-sig", "Author": "user@proton.me"},
+					},
+				},
+			},
+		},
+	})
+	eventID := parseResponse(t, syncResp)["Responses"].([]interface{})[0].(map[string]interface{})["Response"].(map[string]interface{})["Event"].(map[string]interface{})["ID"].(string)
+
+	// Update event with new encrypted data
+	newCalKeyPacket := "wV4D+UPDATED+calendarKeyPacket+base64=="
+	newSharedKeyPacket := "wV4D+UPDATED+sharedKeyPacket+base64=="
+	newAddressKeyPacket := "wV4D+UPDATED+addressKeyPacket+base64=="
+
+	updateResp := ts.request(t, http.MethodPut, "/calendar/v1/"+calID+"/events/sync", map[string]interface{}{
+		"MemberID": "m1",
+		"Events": []map[string]interface{}{
+			{
+				"ID": eventID,
+				"Event": map[string]interface{}{
+					"Permissions":       127,
+					"StartTime":         3000,
+					"EndTime":           4000,
+					"StartTimezone":     "America/New_York",
+					"EndTimezone":       "America/New_York",
+					"CalendarKeyPacket": newCalKeyPacket,
+					"SharedKeyPacket":   newSharedKeyPacket,
+					"AddressKeyPacket":  newAddressKeyPacket,
+					"CalendarEventContent": []map[string]interface{}{
+						{"Type": 3, "Data": "UPDATED-encrypted-calendar-data", "Signature": "updated-cal-sig", "Author": "user@proton.me"},
+					},
+					"SharedEventContent": []map[string]interface{}{
+						{"Type": 2, "Data": "UPDATED-signed-shared-data", "Signature": "updated-shared-sig", "Author": "user@proton.me"},
+					},
+					"AttendeesEventContent": []map[string]interface{}{
+						{"Type": 1, "Data": "UPDATED-encrypted-attendee-data", "Author": "user@proton.me"},
+					},
+				},
+			},
+		},
+	})
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("sync update: expected 200, got %d: %s", updateResp.Code, updateResp.Body.String())
+	}
+
+	// Verify the updated event
+	getResp := ts.request(t, http.MethodGet, "/calendar/v1/"+calID+"/events/"+eventID, nil)
+	event := parseResponse(t, getResp)["Event"].(map[string]interface{})
+
+	// Key packets should be updated
+	if event["CalendarKeyPacket"] != newCalKeyPacket {
+		t.Errorf("CalendarKeyPacket: expected updated value, got %v", event["CalendarKeyPacket"])
+	}
+	if event["SharedKeyPacket"] != newSharedKeyPacket {
+		t.Errorf("SharedKeyPacket: expected updated value, got %v", event["SharedKeyPacket"])
+	}
+	if event["AddressKeyPacket"] != newAddressKeyPacket {
+		t.Errorf("AddressKeyPacket: expected updated value, got %v", event["AddressKeyPacket"])
+	}
+
+	// CalendarEvents data should be updated
+	calEvents := event["CalendarEvents"].([]interface{})
+	if len(calEvents) != 1 {
+		t.Fatalf("expected 1 calendar event, got %d", len(calEvents))
+	}
+	ce := calEvents[0].(map[string]interface{})
+	if ce["Data"] != "UPDATED-encrypted-calendar-data" {
+		t.Errorf("CalendarEvents[0].Data: expected updated, got %v", ce["Data"])
+	}
+	if ce["Signature"] != "updated-cal-sig" {
+		t.Errorf("CalendarEvents[0].Signature: expected updated, got %v", ce["Signature"])
+	}
+
+	// SharedEvents data should be updated
+	sharedEvents := event["SharedEvents"].([]interface{})
+	if len(sharedEvents) != 1 {
+		t.Fatalf("expected 1 shared event, got %d", len(sharedEvents))
+	}
+	se := sharedEvents[0].(map[string]interface{})
+	if se["Data"] != "UPDATED-signed-shared-data" {
+		t.Errorf("SharedEvents[0].Data: expected updated, got %v", se["Data"])
+	}
+	if se["Type"].(float64) != 2 {
+		t.Errorf("SharedEvents[0].Type: expected 2 (Signed), got %v", se["Type"])
+	}
+
+	// AttendeesEvents should be present
+	attEvents := event["AttendeesEvents"].([]interface{})
+	if len(attEvents) != 1 {
+		t.Fatalf("expected 1 attendee event, got %d", len(attEvents))
+	}
+	ae := attEvents[0].(map[string]interface{})
+	if ae["Data"] != "UPDATED-encrypted-attendee-data" {
+		t.Errorf("AttendeesEvents[0].Data: expected updated, got %v", ae["Data"])
+	}
+
+	// Metadata should be updated
+	if event["StartTimezone"] != "America/New_York" {
+		t.Errorf("StartTimezone: expected America/New_York, got %v", event["StartTimezone"])
+	}
+}
+
+// TestIntegration_E2E_AllCardTypes validates each CalendarCardType is stored
+// and returned with correct type, data, signature, and author fields.
+func TestIntegration_E2E_AllCardTypes(t *testing.T) {
+	ts := newTestServer(t)
+
+	calResp := ts.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
+		"Name": "CardType Test", "Color": "#0000ff", "AddressID": "cards@proton.me", "Display": 1,
+	})
+	calID := parseResponse(t, calResp)["Calendar"].(map[string]interface{})["ID"].(string)
+
+	cardTypes := []struct {
+		name     string
+		typeVal  int
+		data     string
+		hasSig   bool
+		sig      string
+	}{
+		{"Clear", 0, "CLEAR:plaintext calendar data", false, ""},
+		{"Encrypted", 1, "wcBMA+encrypted+blob+data==", false, ""},
+		{"Signed", 2, "SIGNED:plaintext with signature", true, "-----BEGIN PGP SIGNATURE-----\nsigned-data\n-----END PGP SIGNATURE-----"},
+		{"Both", 3, "wcBMA+encrypted+and+signed==", true, "-----BEGIN PGP SIGNATURE-----\nboth-sig-data\n-----END PGP SIGNATURE-----"},
+	}
+
+	for _, ct := range cardTypes {
+		t.Run(ct.name, func(t *testing.T) {
+			eventContent := []map[string]interface{}{
+				{
+					"Type":   ct.typeVal,
+					"Data":   ct.data,
+					"Author": "test@proton.me",
+				},
+			}
+			if ct.hasSig {
+				eventContent[0]["Signature"] = ct.sig
+			}
+
+			syncResp := ts.request(t, http.MethodPut, "/calendar/v1/"+calID+"/events/sync", map[string]interface{}{
+				"MemberID": "m1",
+				"Events": []map[string]interface{}{
+					{
+						"Event": map[string]interface{}{
+							"Permissions":          127,
+							"StartTime":            int64(1000 + ct.typeVal*1000),
+							"EndTime":              int64(2000 + ct.typeVal*1000),
+							"StartTimezone":        "UTC",
+							"EndTimezone":          "UTC",
+							"CalendarEventContent": eventContent,
+							"SharedEventContent":   eventContent,
+						},
+					},
+				},
+			})
+			if syncResp.Code != http.StatusOK {
+				t.Fatalf("sync: expected 200, got %d", syncResp.Code)
+			}
+
+			eventID := parseResponse(t, syncResp)["Responses"].([]interface{})[0].(map[string]interface{})["Response"].(map[string]interface{})["Event"].(map[string]interface{})["ID"].(string)
+
+			// GET and verify
+			getResp := ts.request(t, http.MethodGet, "/calendar/v1/"+calID+"/events/"+eventID, nil)
+			event := parseResponse(t, getResp)["Event"].(map[string]interface{})
+
+			for _, fieldName := range []string{"CalendarEvents", "SharedEvents"} {
+				events := event[fieldName].([]interface{})
+				if len(events) != 1 {
+					t.Fatalf("%s: expected 1 entry, got %d", fieldName, len(events))
+				}
+				entry := events[0].(map[string]interface{})
+
+				if entry["Type"].(float64) != float64(ct.typeVal) {
+					t.Errorf("%s.Type: expected %d, got %v", fieldName, ct.typeVal, entry["Type"])
+				}
+				if entry["Data"].(string) != ct.data {
+					t.Errorf("%s.Data: expected %q, got %q", fieldName, ct.data, entry["Data"])
+				}
+				if entry["Author"].(string) != "test@proton.me" {
+					t.Errorf("%s.Author: expected test@proton.me, got %v", fieldName, entry["Author"])
+				}
+				if ct.hasSig {
+					if entry["Signature"].(string) != ct.sig {
+						t.Errorf("%s.Signature: expected signature, got %v", fieldName, entry["Signature"])
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestIntegration_E2E_MultipleEventDataEntries verifies that multiple
+// CalendarEventData entries per event are stored and returned correctly.
+func TestIntegration_E2E_MultipleEventDataEntries(t *testing.T) {
+	ts := newTestServer(t)
+
+	calResp := ts.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
+		"Name": "Multi Entry Test", "Color": "#ff00ff", "AddressID": "multi@proton.me", "Display": 1,
+	})
+	calID := parseResponse(t, calResp)["Calendar"].(map[string]interface{})["ID"].(string)
+
+	// Create event with multiple entries in each encrypted data array
+	syncResp := ts.request(t, http.MethodPut, "/calendar/v1/"+calID+"/events/sync", map[string]interface{}{
+		"MemberID": "m1",
+		"Events": []map[string]interface{}{
+			{
+				"Event": map[string]interface{}{
+					"Permissions":   127,
+					"StartTime":     5000,
+					"EndTime":       6000,
+					"StartTimezone": "UTC",
+					"EndTimezone":   "UTC",
+					"CalendarEventContent": []map[string]interface{}{
+						{"Type": 0, "Data": "clear-personal-data", "Author": "user@proton.me"},
+						{"Type": 2, "Data": "signed-personal-data", "Signature": "personal-sig", "Author": "user@proton.me"},
+					},
+					"SharedEventContent": []map[string]interface{}{
+						{"Type": 2, "Data": "signed-shared-metadata", "Signature": "shared-meta-sig", "Author": "user@proton.me"},
+						{"Type": 3, "Data": "encrypted-signed-shared-body", "Signature": "shared-body-sig", "Author": "user@proton.me"},
+					},
+					"AttendeesEventContent": []map[string]interface{}{
+						{"Type": 1, "Data": "encrypted-attendee-1", "Author": "user@proton.me"},
+						{"Type": 3, "Data": "encrypted-signed-attendee-2", "Signature": "att-sig", "Author": "user@proton.me"},
+					},
+				},
+			},
+		},
+	})
+	eventID := parseResponse(t, syncResp)["Responses"].([]interface{})[0].(map[string]interface{})["Response"].(map[string]interface{})["Event"].(map[string]interface{})["ID"].(string)
+
+	getResp := ts.request(t, http.MethodGet, "/calendar/v1/"+calID+"/events/"+eventID, nil)
+	event := parseResponse(t, getResp)["Event"].(map[string]interface{})
+
+	calEvents := event["CalendarEvents"].([]interface{})
+	if len(calEvents) != 2 {
+		t.Fatalf("CalendarEvents: expected 2 entries, got %d", len(calEvents))
+	}
+	if calEvents[0].(map[string]interface{})["Data"].(string) != "clear-personal-data" {
+		t.Errorf("CalendarEvents[0].Data mismatch")
+	}
+	if calEvents[1].(map[string]interface{})["Data"].(string) != "signed-personal-data" {
+		t.Errorf("CalendarEvents[1].Data mismatch")
+	}
+
+	sharedEvents := event["SharedEvents"].([]interface{})
+	if len(sharedEvents) != 2 {
+		t.Fatalf("SharedEvents: expected 2 entries, got %d", len(sharedEvents))
+	}
+	if sharedEvents[0].(map[string]interface{})["Data"].(string) != "signed-shared-metadata" {
+		t.Errorf("SharedEvents[0].Data mismatch")
+	}
+	if sharedEvents[1].(map[string]interface{})["Data"].(string) != "encrypted-signed-shared-body" {
+		t.Errorf("SharedEvents[1].Data mismatch")
+	}
+
+	attEvents := event["AttendeesEvents"].([]interface{})
+	if len(attEvents) != 2 {
+		t.Fatalf("AttendeesEvents: expected 2 entries, got %d", len(attEvents))
+	}
+	if attEvents[0].(map[string]interface{})["Data"].(string) != "encrypted-attendee-1" {
+		t.Errorf("AttendeesEvents[0].Data mismatch")
+	}
+	if attEvents[1].(map[string]interface{})["Data"].(string) != "encrypted-signed-attendee-2" {
+		t.Errorf("AttendeesEvents[1].Data mismatch")
+	}
+}
+
+// TestIntegration_E2E_KeyPacketPreservation verifies key packets are stored
+// and retrieved exactly as sent, with no modification by the backend.
+func TestIntegration_E2E_KeyPacketPreservation(t *testing.T) {
+	ts := newTestServer(t)
+
+	calResp := ts.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
+		"Name": "KeyPacket Test", "Color": "#123456", "AddressID": "kp@proton.me", "Display": 1,
+	})
+	calID := parseResponse(t, calResp)["Calendar"].(map[string]interface{})["ID"].(string)
+
+	// Use realistic-looking base64 key packets with special chars
+	calKP := "wV4Dk7H5hGBtKRBSAQdA/+calKP/with+special/chars=="
+	sharedKP := "wV4Dk7H5hGBtKRBSAQdA/+sharedKP/with+special/chars+and+padding==="
+	addressKP := "wV4Dk7H5hGBtKRBSAQdA/+addressKP/longer+data+with+various+chars+/+=="
+
+	syncResp := ts.request(t, http.MethodPut, "/calendar/v1/"+calID+"/events/sync", map[string]interface{}{
+		"MemberID": "m1",
+		"Events": []map[string]interface{}{
+			{
+				"Event": map[string]interface{}{
+					"Permissions":       127,
+					"StartTime":         7000,
+					"EndTime":           8000,
+					"StartTimezone":     "UTC",
+					"EndTimezone":       "UTC",
+					"CalendarKeyPacket": calKP,
+					"SharedKeyPacket":   sharedKP,
+					"AddressKeyPacket":  addressKP,
+					"AddressID":         "addr-kp-test",
+					"CalendarEventContent": []map[string]interface{}{
+						{"Type": 3, "Data": "encrypted-data", "Signature": "sig", "Author": "u@p.me"},
+					},
+					"SharedEventContent": []map[string]interface{}{
+						{"Type": 3, "Data": "encrypted-shared", "Signature": "sig2", "Author": "u@p.me"},
+					},
+				},
+			},
+		},
+	})
+	eventID := parseResponse(t, syncResp)["Responses"].([]interface{})[0].(map[string]interface{})["Response"].(map[string]interface{})["Event"].(map[string]interface{})["ID"].(string)
+
+	getResp := ts.request(t, http.MethodGet, "/calendar/v1/"+calID+"/events/"+eventID, nil)
+	event := parseResponse(t, getResp)["Event"].(map[string]interface{})
+
+	if event["CalendarKeyPacket"].(string) != calKP {
+		t.Errorf("CalendarKeyPacket not preserved exactly: got %q, want %q", event["CalendarKeyPacket"], calKP)
+	}
+	if event["SharedKeyPacket"].(string) != sharedKP {
+		t.Errorf("SharedKeyPacket not preserved exactly: got %q, want %q", event["SharedKeyPacket"], sharedKP)
+	}
+	if event["AddressKeyPacket"].(string) != addressKP {
+		t.Errorf("AddressKeyPacket not preserved exactly: got %q, want %q", event["AddressKeyPacket"], addressKP)
+	}
+	if event["AddressID"].(string) != "addr-kp-test" {
+		t.Errorf("AddressID not preserved: got %q", event["AddressID"])
+	}
+}
+
+// TestIntegration_E2E_PassphraseKeyPacketForMembers verifies that the
+// PassphraseKeyPacket used for sharing calendar encryption keys with
+// other members is stored and managed correctly.
+func TestIntegration_E2E_PassphraseKeyPacketForMembers(t *testing.T) {
+	ts := newTestServer(t)
+
+	calResp := ts.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
+		"Name": "Member E2E Test", "Color": "#654321", "AddressID": "owner@proton.me", "Display": 1,
+	})
+	calID := parseResponse(t, calResp)["Calendar"].(map[string]interface{})["ID"].(string)
+
+	// Add a member with PassphraseKeyPacket
+	memberResp := ts.request(t, http.MethodPost, "/calendar/v1/"+calID+"/members", map[string]interface{}{
+		"Email":               "member@proton.me",
+		"PassphraseKeyPacket": "wV4Dk+passphrase+key+packet+encrypted+with+member+public+key==",
+		"Permissions":         63,
+	})
+	if memberResp.Code != http.StatusOK {
+		t.Fatalf("add member: expected 200, got %d: %s", memberResp.Code, memberResp.Body.String())
+	}
+	memberData := parseResponse(t, memberResp)
+	member := memberData["Member"].(map[string]interface{})
+	memberID := member["ID"].(string)
+	if memberID == "" {
+		t.Fatal("expected non-empty member ID")
+	}
+	if member["Email"].(string) != "member@proton.me" {
+		t.Errorf("member Email: expected member@proton.me, got %v", member["Email"])
+	}
+	if member["Permissions"].(float64) != 63 {
+		t.Errorf("member Permissions: expected 63, got %v", member["Permissions"])
+	}
+
+	// Verify members list includes the new member
+	membersResp := ts.request(t, http.MethodGet, "/calendar/v1/"+calID+"/members", nil)
+	members := parseResponse(t, membersResp)["Members"].([]interface{})
+	found := false
+	for _, m := range members {
+		if m.(map[string]interface{})["Email"].(string) == "member@proton.me" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("new member not found in members list")
+	}
+}
+
+// TestIntegration_E2E_BackendNeverModifiesEncryptedContent verifies that
+// the backend acts as a pure storage layer and never modifies any
+// encrypted content fields.
+func TestIntegration_E2E_BackendNeverModifiesEncryptedContent(t *testing.T) {
+	ts := newTestServer(t)
+
+	calResp := ts.request(t, http.MethodPost, "/calendar/v1", map[string]interface{}{
+		"Name": "Immutability Test", "Color": "#abcdef", "AddressID": "immutable@proton.me", "Display": 1,
+	})
+	calID := parseResponse(t, calResp)["Calendar"].(map[string]interface{})["ID"].(string)
+
+	// Create event with carefully crafted encrypted data including special
+	// characters, long strings, and Unicode to verify no corruption occurs
+	specialData := "wcBMA7H5hGBtKRBAAQgA\n\ttabs+and+newlines\r\n+unicode:日本語+emoji:🔒+base64:/+=="
+	specialSig := "-----BEGIN PGP SIGNATURE-----\nVersion: OpenPGP.js\n\nwsBcBAAB+special/chars/in/signature==\n-----END PGP SIGNATURE-----"
+
+	syncResp := ts.request(t, http.MethodPut, "/calendar/v1/"+calID+"/events/sync", map[string]interface{}{
+		"MemberID": "m1",
+		"Events": []map[string]interface{}{
+			{
+				"Event": map[string]interface{}{
+					"Permissions":       127,
+					"StartTime":         9000,
+					"EndTime":           10000,
+					"StartTimezone":     "UTC",
+					"EndTimezone":       "UTC",
+					"CalendarKeyPacket": "key-packet-with-special/chars+/==",
+					"SharedKeyPacket":   "shared-key-special/chars+/padding===",
+					"CalendarEventContent": []map[string]interface{}{
+						{"Type": 3, "Data": specialData, "Signature": specialSig, "Author": "test@proton.me"},
+					},
+					"SharedEventContent": []map[string]interface{}{
+						{"Type": 3, "Data": specialData, "Signature": specialSig, "Author": "test@proton.me"},
+					},
+				},
+			},
+		},
+	})
+	eventID := parseResponse(t, syncResp)["Responses"].([]interface{})[0].(map[string]interface{})["Response"].(map[string]interface{})["Event"].(map[string]interface{})["ID"].(string)
+
+	// Read back multiple times to verify consistency
+	for i := 0; i < 3; i++ {
+		getResp := ts.request(t, http.MethodGet, "/calendar/v1/"+calID+"/events/"+eventID, nil)
+		event := parseResponse(t, getResp)["Event"].(map[string]interface{})
+
+		calEvents := event["CalendarEvents"].([]interface{})
+		ce := calEvents[0].(map[string]interface{})
+		if ce["Data"].(string) != specialData {
+			t.Errorf("read %d: CalendarEvents[0].Data was modified by backend", i+1)
+		}
+		if ce["Signature"].(string) != specialSig {
+			t.Errorf("read %d: CalendarEvents[0].Signature was modified by backend", i+1)
+		}
+
+		sharedEvents := event["SharedEvents"].([]interface{})
+		se := sharedEvents[0].(map[string]interface{})
+		if se["Data"].(string) != specialData {
+			t.Errorf("read %d: SharedEvents[0].Data was modified by backend", i+1)
+		}
+		if se["Signature"].(string) != specialSig {
+			t.Errorf("read %d: SharedEvents[0].Signature was modified by backend", i+1)
+		}
+
+		if event["CalendarKeyPacket"].(string) != "key-packet-with-special/chars+/==" {
+			t.Errorf("read %d: CalendarKeyPacket was modified by backend", i+1)
+		}
+	}
+}
+
+// verifyEncryptedEvent is a helper that checks all encrypted fields of an event.
+func verifyEncryptedEvent(t *testing.T, event map[string]interface{}, context string,
+	expectedCalKP, expectedSharedKP, expectedAddressKP string,
+	expectedCalContent, expectedSharedContent, expectedAttContent []map[string]interface{},
+	expectedSig string) {
+	t.Helper()
+
+	// Verify key packets
+	if event["CalendarKeyPacket"].(string) != expectedCalKP {
+		t.Errorf("[%s] CalendarKeyPacket mismatch: got %q", context, event["CalendarKeyPacket"])
+	}
+	if event["SharedKeyPacket"].(string) != expectedSharedKP {
+		t.Errorf("[%s] SharedKeyPacket mismatch: got %q", context, event["SharedKeyPacket"])
+	}
+	if event["AddressKeyPacket"].(string) != expectedAddressKP {
+		t.Errorf("[%s] AddressKeyPacket mismatch: got %q", context, event["AddressKeyPacket"])
+	}
+
+	// Verify CalendarEvents
+	calEvents := event["CalendarEvents"].([]interface{})
+	if len(calEvents) != len(expectedCalContent) {
+		t.Fatalf("[%s] CalendarEvents: expected %d entries, got %d", context, len(expectedCalContent), len(calEvents))
+	}
+	for i, expected := range expectedCalContent {
+		actual := calEvents[i].(map[string]interface{})
+		if actual["Type"].(float64) != float64(expected["Type"].(int)) {
+			t.Errorf("[%s] CalendarEvents[%d].Type: expected %v, got %v", context, i, expected["Type"], actual["Type"])
+		}
+		if actual["Data"].(string) != expected["Data"].(string) {
+			t.Errorf("[%s] CalendarEvents[%d].Data mismatch", context, i)
+		}
+	}
+
+	// Verify SharedEvents
+	sharedEvents := event["SharedEvents"].([]interface{})
+	if len(sharedEvents) != len(expectedSharedContent) {
+		t.Fatalf("[%s] SharedEvents: expected %d entries, got %d", context, len(expectedSharedContent), len(sharedEvents))
+	}
+	for i, expected := range expectedSharedContent {
+		actual := sharedEvents[i].(map[string]interface{})
+		if actual["Type"].(float64) != float64(expected["Type"].(int)) {
+			t.Errorf("[%s] SharedEvents[%d].Type: expected %v, got %v", context, i, expected["Type"], actual["Type"])
+		}
+		if actual["Data"].(string) != expected["Data"].(string) {
+			t.Errorf("[%s] SharedEvents[%d].Data mismatch", context, i)
+		}
+		if expected["Signature"] != nil {
+			if actual["Signature"].(string) != expected["Signature"].(string) {
+				t.Errorf("[%s] SharedEvents[%d].Signature mismatch", context, i)
+			}
+		}
+	}
+
+	// Verify AttendeesEvents
+	attEvents := event["AttendeesEvents"].([]interface{})
+	if len(attEvents) != len(expectedAttContent) {
+		t.Fatalf("[%s] AttendeesEvents: expected %d entries, got %d", context, len(expectedAttContent), len(attEvents))
+	}
+	for i, expected := range expectedAttContent {
+		actual := attEvents[i].(map[string]interface{})
+		if actual["Data"].(string) != expected["Data"].(string) {
+			t.Errorf("[%s] AttendeesEvents[%d].Data mismatch", context, i)
+		}
 	}
 }

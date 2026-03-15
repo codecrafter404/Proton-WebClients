@@ -203,7 +203,7 @@ func newID() string { return uuid.New().String() }
 
 // ---------- Calendar Operations ----------
 
-func (s *Store) CreateCalendar(args models.CalendarCreateArguments) (*models.CalendarWithMembers, error) {
+func (s *Store) CreateCalendar(args models.CalendarCreateArguments) (*models.VisualCalendar, error) {
 	calID := newID()
 	memberID := newID()
 	settingsID := newID()
@@ -253,18 +253,18 @@ func (s *Store) CreateCalendar(args models.CalendarCreateArguments) (*models.Cal
 	return s.GetCalendar(calID)
 }
 
-func (s *Store) GetCalendar(calendarID string) (*models.CalendarWithMembers, error) {
+func (s *Store) GetCalendar(calendarID string) (*models.VisualCalendar, error) {
 	row := s.db.QueryRow("SELECT id, type, owner_email, name, description, color, display, flags, permissions, priority FROM calendars WHERE id=?", calendarID)
-	var cal models.CalendarWithMembers
-	var name, desc, color, email string
-	var display, flags, perm, prio int
-	if err := row.Scan(&cal.ID, &cal.Type, &email, &name, &desc, &color, &display, &flags, &perm, &prio); err != nil {
+	var cal models.VisualCalendar
+	var email string
+	if err := row.Scan(&cal.ID, &cal.Type, &email, &cal.Name, &cal.Description, &cal.Color, &cal.Display, &cal.Flags, &cal.Permissions, &cal.Priority); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("calendar not found: %s", calendarID)
 		}
 		return nil, err
 	}
 	cal.Owner = models.CalendarOwner{Email: email}
+	cal.Email = email
 
 	members, err := s.listMembers(calendarID)
 	if err != nil {
@@ -294,7 +294,7 @@ func (s *Store) listMembers(calendarID string) ([]models.CalendarMember, error) 
 	return members, rows.Err()
 }
 
-func (s *Store) ListCalendars() ([]*models.CalendarWithMembers, error) {
+func (s *Store) ListCalendars() ([]*models.VisualCalendar, error) {
 	rows, err := s.db.Query("SELECT id FROM calendars ORDER BY priority")
 	if err != nil {
 		return nil, err
@@ -314,7 +314,7 @@ func (s *Store) ListCalendars() ([]*models.CalendarWithMembers, error) {
 		return nil, err
 	}
 
-	result := make([]*models.CalendarWithMembers, 0, len(ids))
+	result := make([]*models.VisualCalendar, 0, len(ids))
 	for _, id := range ids {
 		cal, err := s.GetCalendar(id)
 		if err != nil {
@@ -346,7 +346,7 @@ func (s *Store) DeleteCalendar(calendarID string) error {
 	return nil
 }
 
-func (s *Store) UpdateCalendar(calendarID string, args models.CalendarUpdateArguments) (*models.CalendarWithMembers, error) {
+func (s *Store) UpdateCalendar(calendarID string, args models.CalendarUpdateArguments) (*models.VisualCalendar, error) {
 	// Check existence
 	if _, err := s.GetCalendar(calendarID); err != nil {
 		return nil, err
@@ -441,7 +441,7 @@ func (s *Store) CreateEvent(calendarID string, data models.CreateOrUpdateCalenda
 		eventID, sharedEventID, calendarID, now, now,
 		data.Permissions, isOrganizer, 0, isPersonalSingleEdit,
 		"author@proton.local", data.Color, data.CalendarKeyPacket,
-		string(calEvents), data.SharedKeyPacket, nil, nil,
+		string(calEvents), data.SharedKeyPacket, data.AddressKeyPacket, data.AddressID,
 		string(sharedEvents), notifJSON, string(attendeesEvents),
 		data.StartTime, data.StartTimezone, data.EndTime, data.EndTimezone,
 		data.FullDay, data.RRule, uid, data.RecurrenceID, string(exdates),
@@ -671,6 +671,7 @@ func (s *Store) UpdateEvent(calendarID, eventID string, data models.CreateOrUpda
 		modify_time=?, permissions=?, is_organizer=?, is_personal_single_edit=?,
 		color=?, calendar_key_packet=COALESCE(?, calendar_key_packet),
 		calendar_events=?, shared_key_packet=COALESCE(?, shared_key_packet),
+		address_key_packet=COALESCE(?, address_key_packet), address_id=COALESCE(?, address_id),
 		shared_events=?, notifications=?, attendees_events=?,
 		start_time=?, start_timezone=?, end_time=?, end_timezone=?,
 		full_day=?, rrule=?, exdates=?
@@ -678,6 +679,7 @@ func (s *Store) UpdateEvent(calendarID, eventID string, data models.CreateOrUpda
 		now, data.Permissions, isOrganizer, isPersonalSingleEdit,
 		data.Color, data.CalendarKeyPacket,
 		string(calEvents), data.SharedKeyPacket,
+		data.AddressKeyPacket, data.AddressID,
 		string(sharedEvents), notifJSON, string(attendeesEvents),
 		data.StartTime, data.StartTimezone, data.EndTime, data.EndTimezone,
 		data.FullDay, data.RRule, string(exdates),

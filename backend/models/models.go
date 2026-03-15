@@ -267,6 +267,8 @@ type CreateOrUpdateCalendarEventData struct {
 	CalendarEventContent []CalendarEventData              `json:"CalendarEventContent,omitempty"`
 	SharedKeyPacket      *string                          `json:"SharedKeyPacket,omitempty"`
 	SharedEventContent   []CalendarEventData              `json:"SharedEventContent,omitempty"`
+	AddressKeyPacket     *string                          `json:"AddressKeyPacket,omitempty"`
+	AddressID            *string                          `json:"AddressID,omitempty"`
 	Notifications        *[]CalendarNotificationSettings  `json:"Notifications"`
 	Color                *string                          `json:"Color"`
 	AttendeesEventContent []CalendarEventData             `json:"AttendeesEventContent,omitempty"`
