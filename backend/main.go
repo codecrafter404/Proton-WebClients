@@ -38,6 +38,7 @@ func main() {
 	fmt.Printf("Calendar API server listening on %s\n", *addr)
 	fmt.Println("Default credentials: proton / proton")
 	fmt.Println("Login: POST /core/v4/auth {\"Username\":\"proton\",\"Password\":\"proton\"}")
+	fmt.Println("Calendar UI: http://localhost" + *addr + "/static/calendar.html")
 	fmt.Println("Test UI: http://localhost" + *addr + "/static/test.html")
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
