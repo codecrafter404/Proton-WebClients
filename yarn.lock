@@ -4155,6 +4155,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@proton/pass@workspace:packages/pass":
+  version: 0.0.0-use.local
+  resolution: "@proton/pass@workspace:packages/pass"
+  languageName: unknown
+  linkType: soft
+
 "@proton/payments@workspace:^, @proton/payments@workspace:packages/payments":
   version: 0.0.0-use.local
   resolution: "@proton/payments@workspace:packages/payments"
