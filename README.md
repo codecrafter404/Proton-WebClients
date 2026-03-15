@@ -1,6 +1,6 @@
 # Proton Calendar
 
-A self-hosted calendar application consisting of a **Go backend API** (with SQLite storage) and the **Proton Calendar web frontend**.
+A self-hosted calendar application consisting of a **Go backend API** (with SQLite storage), the **Proton Calendar web frontend**, and the **Proton Calendar Android app**.
 
 ## Repository Structure
 
@@ -11,12 +11,15 @@ A self-hosted calendar application consisting of a **Go backend API** (with SQLi
 │   ├── models/           # Data models
 │   ├── router/           # URL routing
 │   ├── store/            # SQLite database layer
-│   ├── static/           # Browser-based API test page
+│   ├── static/           # Browser-based test page & calendar UI
 │   ├── k8s/              # Kubernetes manifests
 │   ├── Dockerfile        # Container image build
 │   └── main.go           # Entry point
+├── mobile/               # Mobile applications
+│   └── android-calendar/ # Proton Calendar Android app (git submodule)
 ├── applications/
 │   └── calendar/         # Proton Calendar web frontend (React)
+├── e2e/                  # End-to-end Playwright tests
 └── packages/             # Shared frontend packages
 ```
 
@@ -184,6 +187,67 @@ curl -s -X DELETE http://localhost:8080/core/v4/auth \
 | `GET`    | `/calendar/v1/directory`    | Calendar directory (empty) |
 
 ---
+
+## Mobile App (Android)
+
+The official [Proton Calendar Android app](https://github.com/ProtonMail/android-calendar) is included as a **git submodule** at `mobile/android-calendar/`. This allows automatic syncing with upstream releases.
+
+### Quick Setup
+
+```bash
+# Clone with submodules
+git clone --recurse-submodules https://github.com/codecrafter404/Proton-WebClients.git
+
+# Or initialize submodules after clone
+git submodule update --init --recursive
+```
+
+### Configuring the Dev Server Address
+
+Create `mobile/android-calendar/local.properties`:
+
+```properties
+# Android emulator → host machine backend:
+HOST=10.0.2.2:8080
+
+# Physical device on same WiFi:
+# HOST=192.168.1.100:8080
+
+# Remote server:
+# HOST=calendar.example.com
+
+sdk.dir=/path/to/Android/Sdk
+```
+
+Then build with the **devDebug** variant in Android Studio, or via CLI:
+
+```bash
+cd mobile/android-calendar
+chmod +x gradlew
+./gradlew assembleDevDebug
+```
+
+### CI/CD (GitHub Actions)
+
+The workflow at `.github/workflows/mobile.yml` builds the APK with a configurable backend URL:
+
+1. Go to **Actions** → **Mobile Android Build** → **Run workflow**
+2. Set `backend_url` to your server (default: `10.0.2.2:8080` for emulator)
+3. Select `build_variant` (devDebug, devRelease, prodDebug, prodRelease)
+4. Download the APK from the workflow artifacts
+
+### Syncing with Upstream
+
+```bash
+cd mobile/android-calendar
+git fetch origin
+git checkout origin/release/2.29.0-332  # latest release branch
+cd ../..
+git add mobile/android-calendar
+git commit -m "Update android-calendar to latest release"
+```
+
+For full details, see [mobile/README.md](mobile/README.md).
 
 ## Mobile API Setup
 

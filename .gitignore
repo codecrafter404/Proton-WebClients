@@ -62,3 +62,13 @@ backend/calendar-api
 backend/calendar.db-shm
 backend/calendar.db-wal
 e2e/package-lock.json
+
+# Mobile build artifacts
+mobile/android-calendar/local.properties
+mobile/android-calendar/.gradle/
+mobile/android-calendar/app/build/
+mobile/android-calendar/build/
+mobile/android-calendar/week-view-core/build/
+mobile/android-calendar/shared-test-code/build/
+*.apk
+*.aab
