@@ -267,6 +267,28 @@ func (srv *Server) AddUserWithPassword(username, password string) error {
 	return nil
 }
 
+// CheckPassword verifies a plain-text password against the stored verifier.
+// This is used by the static calendar page which doesn't implement SRP in the browser.
+func (srv *Server) CheckPassword(username, password string) bool {
+	srv.mu.RLock()
+	uv, ok := srv.users[username]
+	srv.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	saltBytes, err := base64.StdEncoding.DecodeString(uv.Salt)
+	if err != nil {
+		return false
+	}
+	hp, err := hashPasswordV4(password, saltBytes, srv.modBytes)
+	if err != nil {
+		return false
+	}
+	x := leToBigInt(hp)
+	v := new(big.Int).Exp(srv.G, x, srv.N)
+	return v.Cmp(uv.Verifier) == 0
+}
+
 // AddUserWithVerifier stores a pre-computed verifier.
 func (srv *Server) AddUserWithVerifier(username string, version int, saltB64, verifierB64 string) error {
 	vBytes, err := base64.StdEncoding.DecodeString(verifierB64)

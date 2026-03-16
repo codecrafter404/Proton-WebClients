@@ -182,10 +182,11 @@ func (m *Manager) HandleAuthModulus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleLogin handles POST /core/v4/auth (SRP authentication)
+// HandleLogin handles POST /core/v4/auth (SRP authentication with simple-password fallback)
 func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username        string `json:"Username"`
+		Password        string `json:"Password"`
 		ClientEphemeral string `json:"ClientEphemeral"`
 		ClientProof     string `json:"ClientProof"`
 		SRPSession      string `json:"SRPSession"`
@@ -197,11 +198,34 @@ func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverProof, username, err := m.SRP.VerifyAuth(req.SRPSession, req.ClientEphemeral, req.ClientProof)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
-			"Code":  8002,
-			"Error": "Incorrect login credentials. Please try again.",
+	var serverProof string
+	var username string
+
+	if req.SRPSession != "" && req.ClientEphemeral != "" && req.ClientProof != "" {
+		// Full SRP authentication
+		var err error
+		serverProof, username, err = m.SRP.VerifyAuth(req.SRPSession, req.ClientEphemeral, req.ClientProof)
+		if err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"Code":  8002,
+				"Error": "Incorrect login credentials. Please try again.",
+			})
+			return
+		}
+	} else if req.Username != "" && req.Password != "" {
+		// Simple password fallback (for static calendar page)
+		if !m.SRP.CheckPassword(req.Username, req.Password) {
+			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"Code":  8002,
+				"Error": "Incorrect login credentials. Please try again.",
+			})
+			return
+		}
+		username = req.Username
+		serverProof = ""
+	} else {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"Code": 400, "Error": "missing authentication fields",
 		})
 		return
 	}
