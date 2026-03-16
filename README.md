@@ -11,7 +11,7 @@ A self-hosted calendar application consisting of a **Go backend API** (with SQLi
 │   ├── models/           # Data models
 │   ├── router/           # URL routing
 │   ├── store/            # SQLite database layer
-│   ├── static/           # Simplified test UI & API test runner
+│   ├── static/           # Simplified test UI and API test runner
 │   ├── k8s/              # Kubernetes manifests
 │   ├── Dockerfile        # Container image build
 │   └── main.go           # Entry point
