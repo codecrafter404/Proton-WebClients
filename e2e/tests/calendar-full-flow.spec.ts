@@ -33,6 +33,10 @@ function uid(prefix: string) {
     return `${prefix}-${RUN_ID}-${++testCounter}`;
 }
 
+/** Wait durations (ms) used after UI actions to allow rendering */
+const RENDER_WAIT = 500;
+const NAV_WAIT = 300;
+
 // Ensure screenshots directory exists
 test.beforeAll(() => {
     if (!fs.existsSync(SCREENSHOTS_DIR)) {
@@ -77,7 +81,7 @@ async function createEvent(page: Page, title: string, hour = 10): Promise<string
     await page.fill('[data-testid="event-end-time"]', `${String(hour + 1).padStart(2, '0')}:00`);
     await page.click('[data-testid="save-event"]');
     await expect(page.locator('#event-modal')).not.toHaveClass(/open/, { timeout: 5_000 });
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(RENDER_WAIT);
     return title;
 }
 
@@ -173,7 +177,7 @@ test.describe('3. Event Creation', () => {
 
         await page.click('[data-testid="save-event"]');
         await expect(page.locator('#event-modal')).not.toHaveClass(/open/, { timeout: 5_000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(RENDER_WAIT);
 
         const chip = page.locator('.event-chip', { hasText: eventName }).first();
         await expect(chip).toBeVisible({ timeout: 5_000 });
@@ -260,7 +264,7 @@ test.describe('5. Event Editing', () => {
         await page.fill('[data-testid="event-title"]', updatedName);
         await page.click('[data-testid="save-event"]');
         await expect(page.locator('#event-modal')).not.toHaveClass(/open/, { timeout: 5_000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(RENDER_WAIT);
 
         await expect(page.locator('.event-chip', { hasText: updatedName }).first()).toBeVisible({ timeout: 5_000 });
         await snap(page, '13-event-updated');
@@ -286,7 +290,7 @@ test.describe('6. Event Deletion', () => {
 
         await page.click('#btn-detail-delete');
         await expect(page.locator('#detail-modal')).not.toHaveClass(/open/, { timeout: 5_000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(RENDER_WAIT);
 
         await expect(page.locator('.event-chip', { hasText: eventName })).toHaveCount(0, { timeout: 5_000 });
         await snap(page, '15-after-delete');
@@ -307,21 +311,21 @@ test.describe('7. Week Navigation', () => {
         await snap(page, '16-week-current');
 
         await page.click('#btn-next');
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(NAV_WAIT);
         const nextRange = await page.textContent('#current-range');
         expect(nextRange).not.toBe(initialRange);
         await snap(page, '17-week-next');
 
         await page.click('#btn-prev');
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(NAV_WAIT);
         await page.click('#btn-prev');
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(NAV_WAIT);
         const prevRange = await page.textContent('#current-range');
         expect(prevRange).not.toBe(nextRange);
         await snap(page, '18-week-prev');
 
         await page.click('#btn-today');
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(NAV_WAIT);
         const todayRange = await page.textContent('#current-range');
         expect(todayRange).toBe(initialRange);
         await snap(page, '19-week-today');
@@ -345,7 +349,7 @@ test.describe('8. Calendar Switching', () => {
 
         // Click Calendar A
         await page.locator('#calendar-list li', { hasText: calA }).click();
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(RENDER_WAIT);
         await expect(page.locator('#calendar-list li', { hasText: calA })).toHaveClass(/active/);
         await snap(page, '20-calendar-switched');
     });
@@ -414,7 +418,7 @@ test.describe('10. Full E2E Flow', () => {
         await page.fill('[data-testid="event-description"]', 'Full E2E test');
         await page.click('[data-testid="save-event"]');
         await expect(page.locator('#event-modal')).not.toHaveClass(/open/, { timeout: 5_000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(RENDER_WAIT);
         await expect(page.locator('.event-chip', { hasText: eventName }).first()).toBeVisible({ timeout: 5_000 });
         await snap(page, '33-flow-event');
 
@@ -430,7 +434,7 @@ test.describe('10. Full E2E Flow', () => {
         await page.fill('[data-testid="event-title"]', editedName);
         await page.click('[data-testid="save-event"]');
         await expect(page.locator('#event-modal')).not.toHaveClass(/open/, { timeout: 5_000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(RENDER_WAIT);
         await expect(page.locator('.event-chip', { hasText: editedName }).first()).toBeVisible({ timeout: 5_000 });
         await snap(page, '35-flow-edited');
 
@@ -439,7 +443,7 @@ test.describe('10. Full E2E Flow', () => {
         await expect(page.locator('#detail-modal')).toHaveClass(/open/, { timeout: 5_000 });
         await page.click('#btn-detail-delete');
         await expect(page.locator('#detail-modal')).not.toHaveClass(/open/, { timeout: 5_000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(RENDER_WAIT);
         await expect(page.locator('.event-chip', { hasText: editedName })).toHaveCount(0, { timeout: 5_000 });
         await snap(page, '36-flow-deleted');
 
