@@ -132,6 +132,10 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 		h.HandleCoreEvents(w, r)
 		return
 	}
+	if strings.HasPrefix(path, "/core/v5/events/") && method == http.MethodGet {
+		h.HandleCoreEvents(w, r)
+		return
+	}
 	if path == "/core/v4/organizations" && method == http.MethodGet {
 		h.HandleOrganization(w, r)
 		return
@@ -205,6 +209,12 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 	}
 
 	// ── Calendar API routes ──────────────────────────────────────────
+
+	// Handle /calendar/v2/{calendarID}/bootstrap
+	if len(parts) >= 4 && parts[0] == "calendar" && parts[1] == "v2" && parts[3] == "bootstrap" && method == http.MethodGet {
+		h.GetCalendarBootstrap(w, r)
+		return
+	}
 
 	if len(parts) < 2 || parts[0] != "calendar" || parts[1] != "v1" {
 		// Unknown route – try catch-all for /core/ prefixed paths
@@ -282,6 +292,13 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 		resource := parts[3]
 
 		switch resource {
+		case "keys":
+			// /calendar/v1/{calendarID}/keys
+			if len(parts) == 4 && method == http.MethodPost {
+				h.SetupCalendarKeys(w, r)
+				return
+			}
+
 		case "settings":
 			// /calendar/v1/{calendarID}/settings
 			if len(parts) == 4 {

@@ -24,21 +24,33 @@ type StoredKey struct {
 	Flags       int
 }
 
+// CalendarKeyData stores the key setup data for a calendar.
+type CalendarKeyData struct {
+	KeyID        string
+	PassphraseID string
+	PrivateKey   string
+	MemberID     string
+	Passphrase   string // DataPacket
+	Signature    string
+}
+
 // Handler provides HTTP handler methods for the calendar API.
 type Handler struct {
 	Store *store.Store
 
-	mu          sync.RWMutex
-	userKeys    []StoredKey            // user-level keys
-	addressKeys map[string][]StoredKey // addressID -> keys
-	keySalt     string                 // stored key salt
+	mu           sync.RWMutex
+	userKeys     []StoredKey            // user-level keys
+	addressKeys  map[string][]StoredKey // addressID -> keys
+	keySalt      string                 // stored key salt
+	calendarKeys map[string]*CalendarKeyData // calendarID -> key data
 }
 
 // New creates a new Handler.
 func New(s *store.Store) *Handler {
 	return &Handler{
-		Store:       s,
-		addressKeys: make(map[string][]StoredKey),
+		Store:        s,
+		addressKeys:  make(map[string][]StoredKey),
+		calendarKeys: make(map[string]*CalendarKeyData),
 	}
 }
 
@@ -112,7 +124,164 @@ func (h *Handler) CreateCalendar(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetCalendar handles GET /calendar/v1/{calendarID}
+// SetupCalendarKeys handles POST /calendar/v1/{calendarID}/keys
+// Stores the calendar's encryption keys (passphrase, private key).
+func (h *Handler) SetupCalendarKeys(w http.ResponseWriter, r *http.Request) {
+	calendarID := pathParam(r, 2)
+
+	var req struct {
+		AddressID  string `json:"AddressID"`
+		Signature  string `json:"Signature"`
+		PrivateKey string `json:"PrivateKey"`
+		Passphrase struct {
+			DataPacket string `json:"DataPacket"`
+			KeyPacket  string `json:"KeyPacket"`
+		} `json:"Passphrase"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Verify the calendar exists
+	cal, err := h.Store.GetCalendar(calendarID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "calendar not found")
+		return
+	}
+
+	keyID := "calkey-" + calendarID
+	passphraseID := "passphrase-" + calendarID
+
+	// Find the member ID from the calendar
+	memberID := ""
+	if len(cal.Members) > 0 {
+		memberID = cal.Members[0].ID
+	}
+
+	// Store the calendar key data for the bootstrap endpoint
+	h.mu.Lock()
+	h.calendarKeys[calendarID] = &CalendarKeyData{
+		KeyID:        keyID,
+		PassphraseID: passphraseID,
+		PrivateKey:   req.PrivateKey,
+		MemberID:     memberID,
+		Passphrase:   req.Passphrase.DataPacket,
+		Signature:    req.Signature,
+	}
+	h.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code": 1000,
+		"Key": map[string]interface{}{
+			"ID":           keyID,
+			"CalendarID":   calendarID,
+			"PrivateKey":   req.PrivateKey,
+			"PassphraseID": passphraseID,
+			"Flags":        3, // ACTIVE | PRIMARY
+		},
+		"Passphrase": map[string]interface{}{
+			"ID":         passphraseID,
+			"CalendarID": calendarID,
+			"Flags":      1,
+			"MemberPassphrases": []map[string]interface{}{
+				{
+					"MemberID":   memberID,
+					"Passphrase": req.Passphrase.DataPacket,
+					"Signature":  req.Signature,
+				},
+			},
+		},
+	})
+}
+
+// GetCalendarBootstrap handles GET /calendar/v2/{calendarID}/bootstrap
+// Returns the full calendar data including keys, passphrase, members, and settings.
+func (h *Handler) GetCalendarBootstrap(w http.ResponseWriter, r *http.Request) {
+	calendarID := pathParam(r, 2)
+
+	cal, err := h.Store.GetCalendar(calendarID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "calendar not found")
+		return
+	}
+
+	h.mu.RLock()
+	keyData := h.calendarKeys[calendarID]
+	h.mu.RUnlock()
+
+	keys := []interface{}{}
+	passphrase := map[string]interface{}{
+		"ID":                 "passphrase-" + calendarID,
+		"Flags":              1,
+		"MemberPassphrases":  []interface{}{},
+		"Invitations":        []interface{}{},
+	}
+
+	if keyData != nil {
+		keys = append(keys, map[string]interface{}{
+			"ID":           keyData.KeyID,
+			"CalendarID":   calendarID,
+			"PrivateKey":   keyData.PrivateKey,
+			"PassphraseID": keyData.PassphraseID,
+			"Flags":        3, // ACTIVE | PRIMARY
+		})
+		passphrase = map[string]interface{}{
+			"ID":    keyData.PassphraseID,
+			"Flags": 1,
+			"MemberPassphrases": []map[string]interface{}{
+				{
+					"MemberID":   keyData.MemberID,
+					"Passphrase": keyData.Passphrase,
+					"Signature":  keyData.Signature,
+				},
+			},
+			"Invitations": []interface{}{},
+		}
+	}
+
+	// Build members list
+	members := []interface{}{}
+	for _, m := range cal.Members {
+		members = append(members, map[string]interface{}{
+			"ID":          m.ID,
+			"CalendarID":  calendarID,
+			"AddressID":   m.AddressID,
+			"Flags":       m.Flags,
+			"Name":        m.Name,
+			"Description": m.Description,
+			"Email":       m.Email,
+			"Permissions": m.Permissions,
+			"Color":       m.Color,
+			"Display":     m.Display,
+			"Priority":    m.Priority,
+		})
+	}
+
+	// Get calendar settings
+	settings, _ := h.Store.GetCalendarSettings(calendarID)
+	calSettings := map[string]interface{}{
+		"ID":                            "settings-" + calendarID,
+		"CalendarID":                    calendarID,
+		"DefaultEventDuration":          1800,
+		"DefaultPartDayNotifications":   []map[string]interface{}{{"Type": 1, "Trigger": "-PT15M"}},
+		"DefaultFullDayNotifications":   []map[string]interface{}{{"Type": 1, "Trigger": "-PT15H"}},
+		"MakesUserBusy":                 1,
+	}
+	if settings != nil {
+		calSettings["ID"] = settings.ID
+		calSettings["DefaultEventDuration"] = settings.DefaultEventDuration
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":             1000,
+		"Keys":             keys,
+		"Passphrase":       passphrase,
+		"Members":          members,
+		"CalendarSettings": calSettings,
+	})
+}
+
 func (h *Handler) GetCalendar(w http.ResponseWriter, r *http.Request) {
 	calendarID := pathParam(r, 2)
 
