@@ -25,6 +25,56 @@ A self-hosted calendar application consisting of a **Go backend API** (with SQLi
 
 ---
 
+## Screenshots
+
+The built-in calendar web UI (`/static/calendar.html`) provides a full-featured interface for managing calendars and events. All event data is end-to-end encrypted.
+
+### Login
+
+![Login Screen](docs/screenshots/01-login-screen.png)
+
+### Calendar Overview
+
+After login, the week view shows your calendars in the sidebar and events on the time grid.
+
+![Calendar Overview (empty)](docs/screenshots/02-calendar-overview-empty.png)
+
+### Creating a Calendar
+
+Click **+ New Calendar** to open the creation dialog. Choose a name and color.
+
+![Create Calendar Dialog](docs/screenshots/03-create-calendar-dialog.png)
+
+After creating calendars, they appear in the sidebar:
+
+![Two Calendars Created](docs/screenshots/05-calendar-overview-two-calendars.png)
+
+### Creating an Event
+
+Click **+ New Event** to open the event form. Fill in title, date, time, location, description, and select a calendar. Events are encrypted before storing.
+
+![Create Event Form](docs/screenshots/06-create-event-filled.png)
+
+### Week View with Events
+
+Events appear as colored blocks on the weekly time grid:
+
+![Week View with Multiple Events](docs/screenshots/08-week-view-with-events.png)
+
+### Event Details
+
+Click any event to view its full details, including encryption status and calendar event card types:
+
+![Event Detail View](docs/screenshots/09-event-detail-view.png)
+
+### Editing Events
+
+Click **Edit** from the detail view to modify an existing event:
+
+![Edit Event Dialog](docs/screenshots/10-edit-event-dialog.png)
+
+---
+
 ## Backend API
 
 The backend is a standalone Go HTTP server that provides a REST API compatible with the Proton Calendar frontend. Data is stored in a SQLite database.
