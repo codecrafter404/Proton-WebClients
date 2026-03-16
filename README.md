@@ -63,7 +63,7 @@ Events appear as colored blocks on the weekly time grid:
 
 ### Event Details
 
-Click any event to view its full details, including encryption status and calendar event card types:
+Click any event to view its full details, including encryption status (CalendarKeyPacket, SharedKeyPacket, AddressKeyPacket) and encrypted data entries:
 
 ![Event Detail View](docs/screenshots/09-event-detail-view.png)
 
