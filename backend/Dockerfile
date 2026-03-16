@@ -14,7 +14,8 @@ COPY tsconfig.base.json tsconfig.webpack.json turbo.json ./
 RUN yarn install --immutable || yarn install
 
 # Build the calendar frontend in standalone mode
-RUN yarn workspace proton-calendar build --appMode=standalone --api=/api
+RUN cd applications/calendar && NODE_ENV=production TS_NODE_PROJECT="../../tsconfig.webpack.json" \
+    npx proton-pack build --appMode=standalone --api=/api
 
 # Stage 2: Build the Go binary
 FROM golang:1.24-alpine AS backend-builder

@@ -52,9 +52,26 @@ func (h *Handler) HandleCoreUsers(w http.ResponseWriter, r *http.Request) {
 			"Delinquent":  0,
 			"Currency":    "USD",
 			"Credit":      0,
+			"CreateTime":  1700000000,
+			"Idle":        0,
 			"MnemonicStatus": 0,
 			"Keys":           keys,
 			"ToMigrate":      0,
+			"Flags": map[string]interface{}{
+				"protected":                        false,
+				"drive-early-access":               false,
+				"onboard-checklist-storage-granted": false,
+				"has-temporary-password":            false,
+				"test-account":                      false,
+				"no-login":                          false,
+				"no-proton-address":                 false,
+				"recovery-attempt":                  false,
+				"pass-lifetime":                     false,
+				"pass-from-sl":                      false,
+				"sso":                               false,
+				"has-a-byoe-address":                false,
+				"delegated-access":                  false,
+			},
 			"AccountRecovery": nil,
 		},
 	})
@@ -529,6 +546,69 @@ func (h *Handler) HandlePaymentStatusV5(w http.ResponseWriter, r *http.Request) 
 		"CountryCode": "US",
 		"State":       nil,
 		"ZipCode":     nil,
+	})
+}
+
+// HandleMailSettings handles GET /mail/v4/settings
+func (h *Handler) HandleMailSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code": 1000,
+		"MailSettings": map[string]interface{}{
+			"DisplayName":    "Proton User",
+			"Signature":      "",
+			"Theme":          "",
+			"AutoResponder":  nil,
+			"AutoSaveContacts": 1,
+			"ComposerMode":   0,
+			"MessageButtons": 0,
+			"ShowImages":     2,
+			"ShowMoved":      0,
+			"ViewMode":       0,
+			"ViewLayout":     0,
+			"SwipeLeft":      3,
+			"SwipeRight":     0,
+			"AlsoArchive":    0,
+			"Hotkeys":        0,
+			"PMSignature":    0,
+			"ImageProxy":     0,
+			"RightToLeft":    0,
+			"AttachPublicKey": 0,
+			"Sign":           0,
+			"PGPScheme":      16,
+			"PromptPin":      0,
+			"NumMessagePerPage": 50,
+			"DraftMIMEType":  "text/html",
+			"ReceiveMIMEType": "text/html",
+			"ShowMIMEType":   "text/html",
+			"StickyLabels":   0,
+			"ConfirmLink":    1,
+			"DelaySendSeconds": 10,
+			"EnableFolderColor": 0,
+			"InheritParentFolderColor": 1,
+			"FontFace":       nil,
+			"FontSize":       nil,
+			"SpamAction":     nil,
+			"BlockSenderConfirmation": nil,
+			"HideSenderImages": 0,
+			"AutoDeleteSpamAndTrashDays": nil,
+		},
+	})
+}
+
+// HandleModelEventsLatest handles GET /calendar/v1/{calendarID}/modelevents/latest
+func (h *Handler) HandleModelEventsLatest(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":    1000,
+		"EventID": "model-event-0",
+	})
+}
+
+// HandleContactEmails handles GET /contacts/v4/contacts/emails
+func (h *Handler) HandleContactEmails(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code":       1000,
+		"ContactEmails": []interface{}{},
+		"Total":      0,
 	})
 }
 

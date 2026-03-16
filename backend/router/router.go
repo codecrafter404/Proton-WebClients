@@ -156,6 +156,20 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 		return
 	}
 
+	// ── Mail settings ───────────────────────────────────────────────
+
+	if path == "/mail/v4/settings" && method == http.MethodGet {
+		h.HandleMailSettings(w, r)
+		return
+	}
+
+	// ── Contacts ────────────────────────────────────────────────────
+
+	if strings.HasPrefix(path, "/contacts/") {
+		h.HandleContactEmails(w, r)
+		return
+	}
+
 	if strings.HasPrefix(path, "/core/v4/payments/") {
 		switch {
 		case strings.HasSuffix(path, "/methods"):
@@ -296,6 +310,13 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 			// /calendar/v1/{calendarID}/keys
 			if len(parts) == 4 && method == http.MethodPost {
 				h.SetupCalendarKeys(w, r)
+				return
+			}
+
+		case "modelevents":
+			// /calendar/v1/{calendarID}/modelevents/latest
+			if len(parts) == 5 && parts[4] == "latest" && method == http.MethodGet {
+				h.HandleModelEventsLatest(w, r)
 				return
 			}
 
