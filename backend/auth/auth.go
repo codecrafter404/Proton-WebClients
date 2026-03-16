@@ -219,7 +219,7 @@ func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "REFRESH-" + sess.UID,
 		Value:    sess.RefreshToken,
-		Path:     "/api/auth/refresh",
+		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -289,7 +289,7 @@ func (m *Manager) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "REFRESH-" + sess.UID,
 		Value:    sess.RefreshToken,
-		Path:     "/api/auth/refresh",
+		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -378,7 +378,7 @@ func (m *Manager) HandleAuthCookies(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "REFRESH-" + sess.UID,
 			Value:    sess.RefreshToken,
-			Path:     "/api/auth/refresh",
+			Path:     "/",
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
 		})

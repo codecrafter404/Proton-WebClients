@@ -1,11 +1,38 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+
+	"github.com/ProtonMail/gopenpgp/v3/crypto"
+	"github.com/google/uuid"
 )
 
 // handleCoreUsers handles GET /core/v4/users
 func (h *Handler) HandleCoreUsers(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	storedKeys := h.userKeys
+	h.mu.RUnlock()
+
+	keys := []interface{}{}
+	hasKeys := 0
+	for _, k := range storedKeys {
+		hasKeys = 1
+		keys = append(keys, map[string]interface{}{
+			"ID":          k.ID,
+			"Primary":     k.Primary,
+			"Flags":       k.Flags,
+			"Fingerprint": k.Fingerprint,
+			"Fingerprints": []string{k.Fingerprint},
+			"PublicKey":   k.PublicKey,
+			"Version":     3,
+			"Activation":  nil,
+			"Active":      k.Active,
+			"PrivateKey":  k.PrivateKey,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code": 1000,
 		"User": map[string]interface{}{
@@ -14,6 +41,7 @@ func (h *Handler) HandleCoreUsers(w http.ResponseWriter, r *http.Request) {
 			"DisplayName": "Proton User",
 			"Email":       "proton@proton.local",
 			"Type":        1,
+			"HasKeys":     hasKeys,
 			"MaxSpace":    1073741824,
 			"MaxUpload":   26214400,
 			"UsedSpace":   0,
@@ -25,7 +53,7 @@ func (h *Handler) HandleCoreUsers(w http.ResponseWriter, r *http.Request) {
 			"Currency":    "USD",
 			"Credit":      0,
 			"MnemonicStatus": 0,
-			"Keys":           []interface{}{},
+			"Keys":           keys,
 			"ToMigrate":      0,
 			"AccountRecovery": nil,
 		},
@@ -34,11 +62,38 @@ func (h *Handler) HandleCoreUsers(w http.ResponseWriter, r *http.Request) {
 
 // handleCoreAddresses handles GET /core/v4/addresses
 func (h *Handler) HandleCoreAddresses(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	storedAddrKeys := h.addressKeys
+	h.mu.RUnlock()
+
+	addressID := "address-1"
+	keys := []interface{}{}
+	hasKeys := 0
+	if addrKeys, ok := storedAddrKeys[addressID]; ok {
+		hasKeys = 1
+		for _, k := range addrKeys {
+			keys = append(keys, map[string]interface{}{
+				"ID":          k.ID,
+				"Primary":     k.Primary,
+				"Flags":       k.Flags,
+				"Fingerprint": k.Fingerprint,
+				"Fingerprints": []string{k.Fingerprint},
+				"PublicKey":   k.PublicKey,
+				"Version":     3,
+				"Activation":  nil,
+				"Active":      k.Active,
+				"PrivateKey":  k.PrivateKey,
+				"Token":       k.Token,
+				"Signature":   k.Signature,
+			})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code": 1000,
 		"Addresses": []map[string]interface{}{
 			{
-				"ID":          "address-1",
+				"ID":          addressID,
 				"DomainID":    "domain-1",
 				"Email":       "proton@proton.local",
 				"Send":        1,
@@ -48,8 +103,8 @@ func (h *Handler) HandleCoreAddresses(w http.ResponseWriter, r *http.Request) {
 				"Order":       1,
 				"DisplayName": "Proton User",
 				"Signature":   "",
-				"HasKeys":     0,
-				"Keys":        []interface{}{},
+				"HasKeys":     hasKeys,
+				"Keys":        keys,
 			},
 		},
 	})
@@ -57,9 +112,109 @@ func (h *Handler) HandleCoreAddresses(w http.ResponseWriter, r *http.Request) {
 
 // handleCoreKeySalts handles GET /core/v4/keys/salts
 func (h *Handler) HandleCoreKeySalts(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	salt := h.keySalt
+	userKeys := h.userKeys
+	h.mu.RUnlock()
+
+	salts := []interface{}{}
+	if salt != "" {
+		for _, k := range userKeys {
+			salts = append(salts, map[string]interface{}{
+				"ID":      k.ID,
+				"KeySalt": salt,
+			})
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"Code":     1000,
-		"KeySalts": []interface{}{},
+		"KeySalts": salts,
+	})
+}
+
+// HandleKeysSetup handles POST /core/v4/keys/setup
+// Stores the user's PGP keys submitted by the frontend after account creation.
+func (h *Handler) HandleKeysSetup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PrimaryKey  string `json:"PrimaryKey"`
+		KeySalt     string `json:"KeySalt"`
+		AddressKeys []struct {
+			AddressID     string          `json:"AddressID"`
+			PrivateKey    string          `json:"PrivateKey"`
+			Token         string          `json:"Token"`
+			Signature     string          `json:"Signature"`
+			SignedKeyList json.RawMessage `json:"SignedKeyList"`
+		} `json:"AddressKeys"`
+		Auth json.RawMessage `json:"Auth"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"Code": 400, "Error": "invalid request body",
+		})
+		return
+	}
+
+	// Extract fingerprint and public key from the primary key
+	userKeyID := uuid.New().String()
+	fingerprint := ""
+	publicKeyArmored := ""
+
+	if req.PrimaryKey != "" {
+		pgpKey, err := crypto.NewKeyFromArmored(req.PrimaryKey)
+		if err == nil {
+			fingerprint = pgpKey.GetFingerprint()
+			publicKeyArmored, _ = pgpKey.GetArmoredPublicKey()
+		} else {
+			fmt.Printf("[keys/setup] Warning: could not parse PrimaryKey: %v\n", err)
+		}
+	}
+
+	h.mu.Lock()
+	h.keySalt = req.KeySalt
+	h.userKeys = []StoredKey{
+		{
+			ID:          userKeyID,
+			PrivateKey:  req.PrimaryKey,
+			PublicKey:   publicKeyArmored,
+			Fingerprint: fingerprint,
+			Primary:     1,
+			Active:      1,
+			Flags:       3,
+		},
+	}
+
+	// Store address keys
+	for _, ak := range req.AddressKeys {
+		addrKeyID := uuid.New().String()
+		addrFingerprint := ""
+		addrPublicKey := ""
+
+		if ak.PrivateKey != "" {
+			pgpKey, err := crypto.NewKeyFromArmored(ak.PrivateKey)
+			if err == nil {
+				addrFingerprint = pgpKey.GetFingerprint()
+				addrPublicKey, _ = pgpKey.GetArmoredPublicKey()
+			}
+		}
+
+		h.addressKeys[ak.AddressID] = []StoredKey{
+			{
+				ID:          addrKeyID,
+				PrivateKey:  ak.PrivateKey,
+				PublicKey:   addrPublicKey,
+				Fingerprint: addrFingerprint,
+				Token:       ak.Token,
+				Signature:   ak.Signature,
+				Primary:     1,
+				Active:      1,
+				Flags:       3,
+			},
+		}
+	}
+	h.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"Code": 1000,
 	})
 }
 

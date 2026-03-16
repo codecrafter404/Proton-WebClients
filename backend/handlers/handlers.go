@@ -5,19 +5,41 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/codecrafter404/Proton-WebClients/backend/models"
 	"github.com/codecrafter404/Proton-WebClients/backend/store"
 )
 
+// StoredKey represents a PGP key stored after key setup.
+type StoredKey struct {
+	ID          string
+	PrivateKey  string
+	PublicKey   string
+	Fingerprint string
+	Token       string
+	Signature   string
+	Primary     int
+	Active      int
+	Flags       int
+}
+
 // Handler provides HTTP handler methods for the calendar API.
 type Handler struct {
 	Store *store.Store
+
+	mu          sync.RWMutex
+	userKeys    []StoredKey            // user-level keys
+	addressKeys map[string][]StoredKey // addressID -> keys
+	keySalt     string                 // stored key salt
 }
 
 // New creates a new Handler.
 func New(s *store.Store) *Handler {
-	return &Handler{Store: s}
+	return &Handler{
+		Store:       s,
+		addressKeys: make(map[string][]StoredKey),
+	}
 }
 
 // writeJSON writes a JSON response.

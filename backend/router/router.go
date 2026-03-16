@@ -104,6 +104,14 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 		h.HandleCoreKeySalts(w, r)
 		return
 	}
+	if path == "/core/v4/keys/setup" && method == http.MethodPost {
+		h.HandleKeysSetup(w, r)
+		return
+	}
+	if path == "/core/v4/keys" && method == http.MethodPost {
+		h.HandleKeysSetup(w, r)
+		return
+	}
 	if path == "/core/v4/settings" && method == http.MethodGet {
 		h.HandleCoreSettings(w, r)
 		return
