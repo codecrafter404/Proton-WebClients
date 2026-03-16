@@ -11,7 +11,7 @@ A self-hosted calendar application consisting of a **Go backend API** (with SQLi
 │   ├── models/           # Data models
 │   ├── router/           # URL routing
 │   ├── store/            # SQLite database layer
-│   ├── static/           # Browser-based test page & calendar UI
+│   ├── static/           # Simplified test UI & API test runner
 │   ├── k8s/              # Kubernetes manifests
 │   ├── Dockerfile        # Container image build
 │   └── main.go           # Entry point
@@ -22,56 +22,6 @@ A self-hosted calendar application consisting of a **Go backend API** (with SQLi
 ├── e2e/                  # End-to-end Playwright tests
 └── packages/             # Shared frontend packages
 ```
-
----
-
-## Screenshots
-
-The built-in calendar web UI (`/static/calendar.html`) provides a full-featured interface for managing calendars and events. All event data is end-to-end encrypted.
-
-### Login
-
-![Login Screen](docs/screenshots/01-login-screen.png)
-
-### Calendar Overview
-
-After login, the week view shows your calendars in the sidebar and events on the time grid.
-
-![Calendar Overview (empty)](docs/screenshots/02-calendar-overview-empty.png)
-
-### Creating a Calendar
-
-Click **+ New Calendar** to open the creation dialog. Choose a name and color.
-
-![Create Calendar Dialog](docs/screenshots/03-create-calendar-dialog.png)
-
-After creating calendars, they appear in the sidebar:
-
-![Two Calendars Created](docs/screenshots/05-calendar-overview-two-calendars.png)
-
-### Creating an Event
-
-Click **+ New Event** to open the event form. Fill in title, date, time, location, description, and select a calendar. Events are encrypted before storing.
-
-![Create Event Form](docs/screenshots/06-create-event-filled.png)
-
-### Week View with Events
-
-Events appear as colored blocks on the weekly time grid:
-
-![Week View with Multiple Events](docs/screenshots/08-week-view-with-events.png)
-
-### Event Details
-
-Click any event to view its full details, including encryption status (CalendarKeyPacket, SharedKeyPacket, AddressKeyPacket) and encrypted data entries:
-
-![Event Detail View](docs/screenshots/09-event-detail-view.png)
-
-### Editing Events
-
-Click **Edit** from the detail view to modify an existing event:
-
-![Edit Event Dialog](docs/screenshots/10-edit-event-dialog.png)
 
 ---
 
