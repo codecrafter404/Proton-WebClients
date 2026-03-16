@@ -37,6 +37,7 @@ func main() {
 
 	// Wrap with auth middleware then CORS
 	apiHandler := authMgr.Middleware(mux)
+	apiHandler = requestLogger(apiHandler)
 	apiHandler = corsMiddleware(apiHandler)
 
 	// Serve static test page at /static/
@@ -129,4 +130,30 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// requestLogger logs API requests for debugging.
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &responseWriter{ResponseWriter: w, statusCode: 200}
+		next.ServeHTTP(rw, r)
+		log.Printf("[API] %s %s => %d (%d bytes)", r.Method, r.URL.String(), rw.statusCode, rw.bytesWritten)
+	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode   int
+	bytesWritten int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	n, err := rw.ResponseWriter.Write(b)
+	rw.bytesWritten += n
+	return n, err
 }

@@ -294,19 +294,41 @@ func (h *Handler) HandleFeatureMetrics(w http.ResponseWriter, r *http.Request) {
 
 // HandleChallenge returns a minimal challenge HTML page.
 // The Proton frontend loads this in an iframe for anti-bot measures.
+// The ChallengeFrame component expects these message stages:
+//   init -> (parent sends load) -> onload -> (parent sends env.loaded + submit.broadcast) -> child.message.data
 func (h *Handler) HandleChallenge(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`<!DOCTYPE html>
 <html><head><script>
-window.addEventListener('message', function(e) {
-  if (e.data && e.data.type === 'pm-challenge') {
-    e.source.postMessage({type: 'pm-challenge-reply', payload: ''}, e.origin);
+(function() {
+  var name = new URLSearchParams(window.location.search).get('Name') || 'challenge';
+
+  window.addEventListener('message', function(e) {
+    if (!e.data || !e.data.type) return;
+
+    if (e.data.type === 'load') {
+      // Stage 2: parent sent styles/config, acknowledge load complete
+      window.parent.postMessage({type: 'onload'}, e.origin);
+    }
+
+    if (e.data.type === 'submit.broadcast') {
+      // Stage 3: parent requests challenge result
+      window.parent.postMessage({
+        type: 'child.message.data',
+        data: {
+          id: name,
+          fingerprint: ''
+        }
+      }, e.origin);
+    }
+  });
+
+  // Stage 1: signal initialization to parent
+  if (window.parent) {
+    window.parent.postMessage({type: 'init'}, '*');
   }
-});
-if (window.parent) {
-  window.parent.postMessage({type: 'pm-load'}, '*');
-}
+})();
 </script></head><body></body></html>`))
 }
 
@@ -340,14 +362,18 @@ func (h *Handler) HandlePaymentPlansDefault(w http.ResponseWriter, r *http.Reque
 // HandlePaymentStatusV5 handles GET /payments/v5/status
 func (h *Handler) HandlePaymentStatusV5(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"Code":       1000,
-		"VendorStatus": map[string]interface{}{
-			"Stripe":  true,
+		"Code": 1000,
+		"VendorStates": map[string]interface{}{
+			"Card":    true,
 			"Paypal":  false,
 			"Apple":   false,
-			"Cash":    false,
+			"Cash":    true,
 			"Bitcoin": false,
+			"Google":  false,
 		},
+		"CountryCode": "US",
+		"State":       nil,
+		"ZipCode":     nil,
 	})
 }
 
