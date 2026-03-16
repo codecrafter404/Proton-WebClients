@@ -4,10 +4,12 @@ export default defineConfig({
     testDir: './tests',
     timeout: 60_000,
     retries: 0,
+    outputDir: './test-results',
     use: {
         baseURL: 'http://localhost:8080',
         headless: true,
-        screenshot: 'only-on-failure',
+        screenshot: 'on',
+        video: 'retain-on-failure',
     },
     projects: [
         {

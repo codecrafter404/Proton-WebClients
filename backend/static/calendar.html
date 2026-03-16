@@ -282,7 +282,9 @@
         const date = new Date(d);
         const day = date.getDay();
         const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-        return new Date(date.setDate(diff));
+        date.setDate(diff);
+        date.setHours(0, 0, 0, 0);
+        return date;
     }
 
     function formatDate(d) {
