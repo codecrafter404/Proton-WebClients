@@ -1,30 +1,6 @@
 package srp
 
-import (
-	"encoding/base64"
-	"fmt"
-
-	"github.com/ProtonMail/gopenpgp/v3/crypto"
-)
-
-// Static PGP key pair for signing the SRP modulus.
-// This key is embedded so the frontend constant (SRP_MODULUS_KEY) can be set once.
-const staticPrivateKey = `-----BEGIN PGP PRIVATE KEY BLOCK-----
-
-xVgEabb6jRYJKwYBBAHaRw8BAQdAT5zQGqIA7Z8XMGMeQl98MevKbM9+LCoSb6WX
-ec/78s4AAPwLgKIeDN3NLqMimrzd/C+p8QMsk178mgK0ntzYuMxoxBJWzRJwcm90
-b25Ac3JwLm1vZHVsdXPCvwQTFggAcQWCabb6jQMLCQcJEK/O6o2vhek4NRQAAAAA
-ABwAEHNhbHRAbm90YXRpb25zLm9wZW5wZ3Bqcy5vcme1pFilHS0s5ACwvsHDVw5f
-AhUIAxYAAgIZAQKbAwIeARYhBPht9pG3jtKCbSfriK/O6o2vhek4AAD8QAEA9zi6
-AQyHQHgP883SA0X57YWvERspC6MX6Gyl1W5r9LUBANWizLIJvj1HMJQGiLAru2zu
-Y36OsJaswCDrg0O6adAKx10Eabb6jRIKKwYBBAGXVQEFAQEHQNCbhqt7F+w+yXCh
-woqDqDkXyrqUNQwStZLl1ingofk+AwEKCQAA/2RjCWJGSnlJY883HxvboNXo965F
-LUMLl2X8iNRjsP24EN/CrgQYFggAYAWCabb6jQkQr87qja+F6Tg1FAAAAAAAHAAQ
-c2FsdEBub3RhdGlvbnMub3BlbnBncGpzLm9yZ4mv/eQl6b/mxGloOMiNZE0CmwwW
-IQT4bfaRt47Sgm0n64ivzuqNr4XpOAAAtMABANH+SSCXScAPDQaDNIo2RKqYOs2L
-2JkSbAi+whJXWePMAQCkA1w36S82YzcwGNc/zGN94WnYXH+U/3vgsYLhosa1Cg==
-=xSZc
------END PGP PRIVATE KEY BLOCK-----`
+import "encoding/base64"
 
 const StaticPublicKey = `-----BEGIN PGP PUBLIC KEY BLOCK-----
 
@@ -42,37 +18,73 @@ P8xjfeFp2Fx/lP974LGC4aLGtQo=
 =hS2s
 -----END PGP PUBLIC KEY BLOCK-----`
 
-// signModulusWithStaticKey signs the modulus using the embedded static PGP key.
+// preSignedModulus is the PGP cleartext-signed modulus, pre-computed using
+// openpgp.js to guarantee format compatibility with the Proton frontend's
+// pmcrypto/CryptoProxy.verifyCleartextMessage().
+//
+// gopenpgp v3's SignCleartext() produces signatures with Hash: SHA256 and
+// extra notation subpackets that can cause verification failures in the
+// frontend's openpgp.js-based stack. By pre-signing with openpgp.js (which
+// uses Hash: SHA512 and a minimal v4 signature packet), we ensure the
+// signed message is byte-for-byte compatible.
+//
+// The modulus value is the RFC 3526 2048-bit MODP prime in little-endian
+// base64, which never changes, so the signature only needs to be computed
+// once.
+const preSignedModulus = `-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+//////////9oqqyKWo5yFRAF+pgYJtIV5WqV6nxJlTkYF1iV9ssr3slSTG/wXcW1j6IH7KKDJ5sDhg4YLHee4zvONi5GXpAyfCEYyghsdPEEmLxKTjUMZ22WlnAHKdWeu1KFIFbzYhyWraPcI11lg1/PJP2oPxZpmtNVHDZI2pgFv2OhuHwAwj1b5OxRZihJ5h9LfBEkn66ln4la+2s47u23BvS2XP8La+03pulCTPTGfl5idrWF5EXCUW1tNeFPNxRf8m0KKzAbQzrNsxmV790ENI55CEpRIpsTO6a+CwJ0zGeKCE4CKdEc3ICLYsbENMJoIaLaD8n//////////w==
+-----BEGIN PGP SIGNATURE-----
+
+wnUEARYKACcFgmm4bPEJkK/O6o2vhek4FiEE+G32kbeO0oJtJ+uIr87qja+F
+6TgAAKA1AQCf3dtb+HgAAU2vcDATeU7c+NXWnhOkvQwmZuYnQWnqvwD/acdq
+DL3CUCB9Dv7lzOoBT2YVDqbDPjnh3obUTV3pDQ4=
+=QpTX
+-----END PGP SIGNATURE-----`
+
+// signModulusWithStaticKey sets the pre-signed modulus and validates that
+// the embedded base64 payload matches the server's computed modulus bytes.
 func (s *Server) signModulusWithStaticKey() error {
-	pgp := crypto.PGP()
-
-	key, err := crypto.NewKeyFromArmored(staticPrivateKey)
-	if err != nil {
-		return fmt.Errorf("failed to load static PGP key: %w", err)
-	}
-
 	s.PublicKeyArmored = StaticPublicKey
+	s.SignedModulus = preSignedModulus
 
-	// Get the modulus as base64 string (this is what gets signed)
-	modulusBase64 := base64.StdEncoding.EncodeToString(s.modBytes)
-
-	// Create a cleartext signed message
-	signingKeyRing, err := crypto.NewKeyRing(key)
-	if err != nil {
-		return fmt.Errorf("failed to create key ring: %w", err)
+	// Sanity check: verify the pre-signed modulus matches the computed value.
+	expected := base64.StdEncoding.EncodeToString(s.modBytes)
+	if extractCleartextBody(preSignedModulus) != expected {
+		return errModulusMismatch
 	}
-
-	signHandle, err := pgp.Sign().SigningKeys(signingKeyRing).New()
-	if err != nil {
-		return fmt.Errorf("failed to create sign handle: %w", err)
-	}
-
-	signedMessage, err := signHandle.SignCleartext([]byte(modulusBase64))
-	if err != nil {
-		return fmt.Errorf("failed to sign modulus: %w", err)
-	}
-
-	s.SignedModulus = string(signedMessage)
-
 	return nil
+}
+
+var errModulusMismatch = errorString("pre-signed modulus does not match computed modulus bytes")
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
+
+// extractCleartextBody returns the text between the blank line after the
+// Hash header and the "-----BEGIN PGP SIGNATURE-----" delimiter.
+func extractCleartextBody(signed string) string {
+	const sep = "\n\n"
+	const sig = "\n-----BEGIN PGP SIGNATURE-----"
+	i := indexOf(signed, sep)
+	if i < 0 {
+		return ""
+	}
+	body := signed[i+len(sep):]
+	j := indexOf(body, sig)
+	if j < 0 {
+		return ""
+	}
+	return body[:j]
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
 }
