@@ -176,7 +176,7 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 			h.HandlePaymentMethods(w, r)
 		case strings.HasSuffix(path, "/status"):
 			h.HandlePaymentStatus(w, r)
-		case strings.HasSuffix(path, "/subscription"):
+		case strings.HasSuffix(path, "/subscription"), strings.HasSuffix(path, "/subscription/latest"):
 			h.HandleSubscription(w, r)
 		default:
 			h.HandleCatchAll(w, r)
@@ -195,7 +195,7 @@ func route(h *handlers.Handler, authMgr *auth.Manager, w http.ResponseWriter, r 
 			h.HandlePaymentStatusV5(w, r)
 		case strings.HasSuffix(path, "/methods"):
 			h.HandlePaymentMethods(w, r)
-		case strings.HasSuffix(path, "/subscription"):
+		case strings.HasSuffix(path, "/subscription"), strings.HasSuffix(path, "/subscription/latest"):
 			h.HandleSubscription(w, r)
 		default:
 			h.HandleCatchAll(w, r)
