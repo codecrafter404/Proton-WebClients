@@ -1,9 +1,13 @@
-import type {
-    OrganizationSettingsGetResponse,
-    OrganizationUpdatePasswordPolicyInput,
-} from '@proton/pass/types/api/pass';
-import type { MaybeNull } from '@proton/pass/types/utils';
+import type { BitField, OrganizationVaultCreateMode } from '@proton/pass/types';
 
-export type OrganizationSettings = Omit<OrganizationSettingsGetResponse, 'PasswordPolicy'> & {
-    PasswordPolicy: MaybeNull<OrganizationUpdatePasswordPolicyInput>;
+export type OrganizationSettings = {
+    ShareMode: BitField;
+    ItemShareMode: BitField;
+    SecureLinkMode: BitField;
+    ForceLockSeconds: number;
+    ExportMode: BitField;
+    VaultCreateMode: OrganizationVaultCreateMode;
+    PasswordPolicy: Record<string, any> | null;
+    AliasCreation: BitField;
+    PauseListEntries: any[];
 };

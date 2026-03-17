@@ -40,6 +40,9 @@ export const findCalendarBootstrapID = (
     calendarBootstrapCache: CalendarsBootstrapState['calendarsBootstrap'],
     cb: (value: CalendarBootstrap) => boolean
 ) => {
+    if (!calendarBootstrapCache) {
+        return;
+    }
     for (const [calendarID, record] of Object.entries(calendarBootstrapCache)) {
         // The old bootstrapped result
         if (record?.value && cb(record.value)) {

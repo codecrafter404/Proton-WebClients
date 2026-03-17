@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proton Calendar</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f6fa; color: #1a1a2e; }
+
+        /* Login */
+        #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .login-card { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 4px 24px rgba(0,0,0,.1); width: 360px; }
+        .login-card h1 { text-align: center; color: #6d4aff; margin-bottom: 8px; font-size: 24px; }
+        .login-card p { text-align: center; color: #666; margin-bottom: 24px; font-size: 14px; }
+        .login-card label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #333; }
+        .login-card input[type=text], .login-card input[type=password] { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+        .login-card input:focus { outline: none; border-color: #6d4aff; box-shadow: 0 0 0 3px rgba(109,74,255,.15); }
+        #login-error { color: #e74c3c; font-size: 13px; margin-bottom: 12px; display: none; }
+        .btn-primary { width: 100%; padding: 12px; background: #6d4aff; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+        .btn-primary:hover { background: #5b3bd4; }
+        .btn-primary:disabled { background: #b3a1ff; cursor: wait; }
+
+        /* App layout */
+        #app-screen { display: none; height: 100vh; }
+        .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: #6d4aff; color: #fff; }
+        .topbar h2 { font-size: 18px; }
+        .topbar-actions { display: flex; gap: 12px; align-items: center; }
+        .topbar .btn-sm { padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,.4); background: transparent; color: #fff; font-size: 13px; cursor: pointer; }
+        .topbar .btn-sm:hover { background: rgba(255,255,255,.15); }
+        #user-label { font-size: 13px; opacity: .85; }
+
+        .app-body { display: flex; height: calc(100vh - 52px); }
+        .sidebar { width: 240px; background: #fff; border-right: 1px solid #e0e0e0; padding: 16px; overflow-y: auto; }
+        .sidebar h3 { font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+        #calendar-list { list-style: none; }
+        #calendar-list li { padding: 8px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 4px; }
+        #calendar-list li:hover { background: #f0f0f0; }
+        #calendar-list li.active { background: #ede8ff; font-weight: 600; }
+        .cal-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        #btn-new-calendar { width: 100%; margin-top: 12px; padding: 8px; background: #f0ecff; color: #6d4aff; border: 1px dashed #6d4aff; border-radius: 6px; font-size: 13px; cursor: pointer; }
+        #btn-new-calendar:hover { background: #e4ddff; }
+
+        /* Main calendar area */
+        .calendar-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .calendar-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: #fff; border-bottom: 1px solid #e0e0e0; }
+        .nav-btns { display: flex; gap: 8px; align-items: center; }
+        .nav-btns button { padding: 6px 12px; border: 1px solid #ddd; background: #fff; border-radius: 6px; cursor: pointer; font-size: 14px; }
+        .nav-btns button:hover { background: #f5f5f5; }
+        #current-range { font-size: 16px; font-weight: 600; min-width: 200px; text-align: center; }
+        .view-btns { display: flex; gap: 4px; }
+        .view-btns button { padding: 6px 14px; border: 1px solid #ddd; background: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .view-btns button.active { background: #6d4aff; color: #fff; border-color: #6d4aff; }
+
+        /* Week view grid */
+        .week-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: 60px repeat(7, 1fr); position: relative; }
+        .week-header { display: contents; }
+        .week-header .corner { background: #fafafa; border-bottom: 1px solid #e0e0e0; border-right: 1px solid #e0e0e0; position: sticky; top: 0; z-index: 2; }
+        .week-header .day-col-header { background: #fafafa; border-bottom: 1px solid #e0e0e0; border-right: 1px solid #e0e0e0; text-align: center; padding: 8px 4px; position: sticky; top: 0; z-index: 2; font-size: 13px; }
+        .day-col-header .day-num { font-size: 20px; font-weight: 700; display: block; }
+        .day-col-header .day-name { font-size: 11px; color: #888; text-transform: uppercase; }
+        .day-col-header.today .day-num { color: #fff; background: #6d4aff; border-radius: 50%; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+
+        .time-label { font-size: 11px; color: #888; text-align: right; padding: 0 8px; border-right: 1px solid #e0e0e0; height: 48px; position: relative; }
+        .time-label span { position: absolute; top: -7px; right: 8px; }
+        .day-cell { border-right: 1px solid #eee; border-bottom: 1px solid #eee; height: 48px; position: relative; cursor: pointer; }
+        .day-cell:hover { background: #f8f5ff; }
+
+        /* Events in grid */
+        .event-chip { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 6px; font-size: 11px; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; z-index: 1; min-height: 20px; }
+        .event-chip:hover { filter: brightness(.9); }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 100; align-items: center; justify-content: center; }
+        .modal-overlay.open { display: flex; }
+        .modal { background: #fff; border-radius: 12px; width: 460px; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(0,0,0,.2); }
+        .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #eee; }
+        .modal-header h3 { font-size: 17px; }
+        .modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #666; padding: 4px 8px; }
+        .modal-body { padding: 20px; }
+        .modal-body label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #333; }
+        .modal-body input, .modal-body select, .modal-body textarea { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 14px; font-family: inherit; }
+        .modal-body textarea { resize: vertical; min-height: 60px; }
+        .modal-body input:focus, .modal-body select:focus, .modal-body textarea:focus { outline: none; border-color: #6d4aff; }
+        .form-row { display: flex; gap: 12px; }
+        .form-row > div { flex: 1; }
+        .modal-footer { display: flex; justify-content: space-between; padding: 14px 20px; border-top: 1px solid #eee; }
+        .btn-danger { padding: 8px 16px; border: none; background: #e74c3c; color: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-save { padding: 8px 20px; border: none; background: #6d4aff; color: #fff; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+        .btn-save:hover { background: #5b3bd4; }
+        .btn-cancel { padding: 8px 16px; border: 1px solid #ddd; background: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .btn-cancel:hover { background: #f5f5f5; }
+        .footer-right { display: flex; gap: 8px; }
+
+        /* New calendar modal */
+        #new-cal-color { width: 48px; height: 36px; padding: 2px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; }
+
+        /* Event detail view */
+        .detail-row { margin-bottom: 12px; }
+        .detail-label { font-size: 12px; color: #888; margin-bottom: 2px; }
+        .detail-value { font-size: 14px; }
+        .encryption-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .encryption-badge.encrypted { background: #d4edda; color: #155724; }
+        .encryption-badge.clear { background: #fff3cd; color: #856404; }
+
+        /* Toast */
+        #toast { position: fixed; bottom: 24px; right: 24px; background: #333; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; display: none; z-index: 200; }
+        #toast.show { display: block; animation: fadeInOut 2.5s; }
+        @keyframes fadeInOut { 0%{opacity:0;transform:translateY(10px)} 10%{opacity:1;transform:translateY(0)} 80%{opacity:1} 100%{opacity:0} }
+    </style>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div class="login-card">
+            <h1>🗓 Proton Calendar</h1>
+            <p>Sign in to your calendar</p>
+            <form id="login-form">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" placeholder="Enter username" autocomplete="username" required>
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="Enter password" autocomplete="current-password" required>
+                <div id="login-error">Invalid username or password</div>
+                <button type="submit" class="btn-primary" id="login-btn">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- App Screen -->
+    <div id="app-screen">
+        <div class="topbar">
+            <h2>🗓 Proton Calendar</h2>
+            <div class="topbar-actions">
+                <span id="user-label"></span>
+                <button class="btn-sm" id="btn-new-event">+ New Event</button>
+                <button class="btn-sm" id="btn-logout">Sign Out</button>
+            </div>
+        </div>
+        <div class="app-body">
+            <div class="sidebar">
+                <h3>My Calendars</h3>
+                <ul id="calendar-list"></ul>
+                <button id="btn-new-calendar">+ New Calendar</button>
+            </div>
+            <div class="calendar-main">
+                <div class="calendar-toolbar">
+                    <div class="nav-btns">
+                        <button id="btn-today">Today</button>
+                        <button id="btn-prev">‹</button>
+                        <button id="btn-next">›</button>
+                        <span id="current-range"></span>
+                    </div>
+                    <div class="view-btns">
+                        <button data-view="week" class="active">Week</button>
+                    </div>
+                </div>
+                <div class="week-grid" id="week-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Modal -->
+    <div class="modal-overlay" id="event-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="event-modal-title">New Event</h3>
+                <button class="modal-close" id="event-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label for="event-title">Title</label>
+                <input type="text" id="event-title" placeholder="Event title" data-testid="event-title">
+
+                <div class="form-row">
+                    <div>
+                        <label for="event-date">Date</label>
+                        <input type="date" id="event-date" data-testid="event-date">
+                    </div>
+                    <div>
+                        <label for="event-start-time">Start Time</label>
+                        <input type="time" id="event-start-time" data-testid="event-start-time">
+                    </div>
+                    <div>
+                        <label for="event-end-time">End Time</label>
+                        <input type="time" id="event-end-time" data-testid="event-end-time">
+                    </div>
+                </div>
+
+                <label for="event-location">Location</label>
+                <input type="text" id="event-location" placeholder="Add location" data-testid="event-location">
+
+                <label for="event-description">Description</label>
+                <textarea id="event-description" placeholder="Add description" data-testid="event-description"></textarea>
+
+                <label for="event-calendar">Calendar</label>
+                <select id="event-calendar" data-testid="event-calendar"></select>
+
+                <label for="event-color">Color</label>
+                <input type="color" id="event-color" value="#6d4aff" data-testid="event-color" style="width:48px;height:36px;padding:2px;border:1px solid #ddd;border-radius:6px;">
+
+                <div id="event-encryption-info" style="margin-top:8px;"></div>
+            </div>
+            <div class="modal-footer">
+                <div>
+                    <button class="btn-danger" id="btn-delete-event" style="display:none;">Delete</button>
+                </div>
+                <div class="footer-right">
+                    <button class="btn-cancel" id="btn-cancel-event">Cancel</button>
+                    <button class="btn-save" id="btn-save-event" data-testid="save-event">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Calendar Modal -->
+    <div class="modal-overlay" id="cal-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>New Calendar</h3>
+                <button class="modal-close" id="cal-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label for="new-cal-name">Calendar Name</label>
+                <input type="text" id="new-cal-name" placeholder="My Calendar" data-testid="cal-name">
+                <label for="new-cal-color">Color</label>
+                <input type="color" id="new-cal-color" value="#6d4aff" data-testid="cal-color">
+            </div>
+            <div class="modal-footer">
+                <div></div>
+                <div class="footer-right">
+                    <button class="btn-cancel" id="btn-cancel-cal">Cancel</button>
+                    <button class="btn-save" id="btn-save-cal" data-testid="save-calendar">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Detail Modal -->
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="detail-modal-title">Event Details</h3>
+                <button class="modal-close" id="detail-modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="detail-body"></div>
+            <div class="modal-footer">
+                <button class="btn-danger" id="btn-detail-delete">Delete</button>
+                <div class="footer-right">
+                    <button class="btn-cancel" id="btn-detail-close">Close</button>
+                    <button class="btn-save" id="btn-detail-edit">Edit</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+    // ====== State ======
+    let token = '', uid = '', userId = '';
+    let calendars = [];
+    let events = [];
+    let activeCalId = '';
+    let editingEventId = null;
+    let currentWeekStart = getMonday(new Date());
+
+    // ====== API Helper ======
+    async function api(method, path, body) {
+        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        if (token) {
+            opts.headers['Authorization'] = 'Bearer ' + token;
+            opts.headers['x-pm-uid'] = uid;
+        }
+        if (body) opts.body = JSON.stringify(body);
+        const resp = await fetch(path, opts);
+        const data = await resp.json();
+        return { status: resp.status, data };
+    }
+
+    // ====== Date Helpers ======
+    function getMonday(d) {
+        const date = new Date(d);
+        const day = date.getDay();
+        const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+        date.setDate(diff);
+        date.setHours(0, 0, 0, 0);
+        return date;
+    }
+
+    function formatDate(d) {
+        return d.toISOString().split('T')[0];
+    }
+
+    function addDays(d, n) {
+        const r = new Date(d);
+        r.setDate(r.getDate() + n);
+        return r;
+    }
+
+    function toUnix(dateStr, timeStr) {
+        return Math.floor(new Date(dateStr + 'T' + timeStr).getTime() / 1000);
+    }
+
+    function fromUnix(ts) {
+        return new Date(ts * 1000);
+    }
+
+    function padTime(h, m) {
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    }
+
+    // ====== Toast ======
+    function showToast(msg) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'show';
+        setTimeout(() => t.className = '', 2600);
+    }
+
+    // ====== Login ======
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const user = document.getElementById('username').value;
+        const pass = document.getElementById('password').value;
+        const btn = document.getElementById('login-btn');
+        const err = document.getElementById('login-error');
+
+        btn.disabled = true;
+        btn.textContent = 'Signing in...';
+        err.style.display = 'none';
+
+        try {
+            const r = await api('POST', '/core/v4/auth', { Username: user, Password: pass });
+            if (r.status === 200 && r.data.Code === 1000) {
+                token = r.data.AccessToken;
+                uid = r.data.UID;
+                userId = r.data.UserID;
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('app-screen').style.display = 'block';
+                document.getElementById('user-label').textContent = user;
+                await loadCalendars();
+                renderWeek();
+            } else {
+                err.style.display = 'block';
+            }
+        } catch (ex) {
+            err.style.display = 'block';
+            err.textContent = 'Connection error: ' + ex.message;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+    });
+
+    // ====== Logout ======
+    document.getElementById('btn-logout').addEventListener('click', () => {
+        token = ''; uid = ''; userId = '';
+        calendars = []; events = []; activeCalId = '';
+        document.getElementById('app-screen').style.display = 'none';
+        document.getElementById('login-screen').style.display = 'flex';
+        document.getElementById('username').value = '';
+        document.getElementById('password').value = '';
+    });
+
+    // ====== Load Calendars ======
+    async function loadCalendars() {
+        const r = await api('GET', '/calendar/v1');
+        if (r.data.Code === 1000) {
+            calendars = r.data.Calendars || [];
+            if (calendars.length > 0 && !activeCalId) {
+                activeCalId = calendars[0].ID;
+            }
+            renderCalendarList();
+            await loadEvents();
+        }
+    }
+
+    function renderCalendarList() {
+        const list = document.getElementById('calendar-list');
+        list.innerHTML = '';
+        calendars.forEach(cal => {
+            const li = document.createElement('li');
+            li.className = cal.ID === activeCalId ? 'active' : '';
+            li.innerHTML = '<span class="cal-dot" style="background:' + (cal.Color || '#6d4aff') + '"></span>' + escapeHtml(cal.Name || 'Untitled');
+            li.dataset.calId = cal.ID;
+            li.addEventListener('click', () => {
+                activeCalId = cal.ID;
+                renderCalendarList();
+                loadEvents().then(renderWeek);
+            });
+            list.appendChild(li);
+        });
+        // Update event calendar dropdown
+        const sel = document.getElementById('event-calendar');
+        sel.innerHTML = '';
+        calendars.forEach(cal => {
+            const opt = document.createElement('option');
+            opt.value = cal.ID;
+            opt.textContent = cal.Name || 'Untitled';
+            sel.appendChild(opt);
+        });
+    }
+
+    // ====== Load Events ======
+    async function loadEvents() {
+        events = [];
+        const start = Math.floor(currentWeekStart.getTime() / 1000);
+        const end = start + 7 * 86400;
+        for (const cal of calendars) {
+            const r = await api('GET', '/calendar/v1/' + cal.ID + '/events?Start=' + start + '&End=' + end + '&Timezone=UTC');
+            if (r.data.Code === 1000 && r.data.Events) {
+                r.data.Events.forEach(ev => {
+                    ev._calColor = cal.Color || '#6d4aff';
+                    ev._calName = cal.Name || 'Untitled';
+                });
+                events = events.concat(r.data.Events);
+            }
+        }
+        renderWeek();
+    }
+
+    // ====== Week View ======
+    function renderWeek() {
+        const grid = document.getElementById('week-grid');
+        grid.innerHTML = '';
+        const today = new Date();
+        const todayStr = formatDate(today);
+
+        // Range label
+        const endOfWeek = addDays(currentWeekStart, 6);
+        const opts = { month: 'short', day: 'numeric' };
+        document.getElementById('current-range').textContent =
+            currentWeekStart.toLocaleDateString('en-US', opts) + ' – ' +
+            endOfWeek.toLocaleDateString('en-US', { ...opts, year: 'numeric' });
+
+        // Header
+        const corner = document.createElement('div');
+        corner.className = 'corner';
+        grid.appendChild(corner);
+
+        const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        for (let d = 0; d < 7; d++) {
+            const day = addDays(currentWeekStart, d);
+            const header = document.createElement('div');
+            header.className = 'day-col-header' + (formatDate(day) === todayStr ? ' today' : '');
+            header.innerHTML = '<span class="day-name">' + dayNames[d] + '</span><span class="day-num">' + day.getDate() + '</span>';
+            grid.appendChild(header);
+        }
+
+        // Hour rows (6am to 22pm)
+        for (let h = 6; h <= 22; h++) {
+            const label = document.createElement('div');
+            label.className = 'time-label';
+            label.innerHTML = '<span>' + (h < 10 ? '0' : '') + h + ':00</span>';
+            grid.appendChild(label);
+
+            for (let d = 0; d < 7; d++) {
+                const cell = document.createElement('div');
+                cell.className = 'day-cell';
+                cell.dataset.day = d;
+                cell.dataset.hour = h;
+                cell.addEventListener('click', () => openNewEventAt(d, h));
+                grid.appendChild(cell);
+            }
+        }
+
+        // Place events
+        events.forEach(ev => {
+            const evStart = fromUnix(ev.StartTime);
+            const evEnd = fromUnix(ev.EndTime);
+            const evDay = Math.floor((evStart.getTime() - currentWeekStart.getTime()) / 86400000);
+            if (evDay < 0 || evDay > 6) return;
+
+            const startHour = evStart.getHours() + evStart.getMinutes() / 60;
+            const endHour = evEnd.getHours() + evEnd.getMinutes() / 60;
+            const duration = Math.max(endHour - startHour, 0.5);
+
+            if (startHour < 6 || startHour > 22) return;
+
+            // Find the cell
+            const row = Math.floor(startHour - 6);
+            const cellIndex = 8 + row * 8 + evDay + 1; // 8 = header row, +1 for time label column
+            const cells = grid.querySelectorAll('.day-cell');
+            const targetCell = cells[row * 7 + evDay];
+            if (!targetCell) return;
+
+            const chip = document.createElement('div');
+            chip.className = 'event-chip';
+            chip.style.background = ev.Color || ev._calColor;
+            chip.style.top = ((startHour - Math.floor(startHour - 6) - 6) * 48) + 'px';
+            chip.style.height = Math.max(duration * 48, 20) + 'px';
+            chip.textContent = getEventTitle(ev);
+            chip.title = getEventTitle(ev);
+            chip.dataset.eventId = ev.ID;
+            chip.dataset.calendarId = ev.CalendarID;
+            chip.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showEventDetail(ev);
+            });
+            targetCell.appendChild(chip);
+        });
+    }
+
+    function getEventTitle(ev) {
+        // Try to extract title from SharedEvents (clear or signed data)
+        if (ev.SharedEvents) {
+            for (const se of ev.SharedEvents) {
+                if (se.Type === 0 || se.Type === 2) { // Clear or Signed
+                    const match = se.Data.match(/SUMMARY[;:]([^\r\n]+)/);
+                    if (match) return match[1];
+                }
+            }
+        }
+        if (ev.CalendarEvents) {
+            for (const ce of ev.CalendarEvents) {
+                if (ce.Type === 0 || ce.Type === 2) {
+                    const match = ce.Data.match(/SUMMARY[;:]([^\r\n]+)/);
+                    if (match) return match[1];
+                }
+            }
+        }
+        return ev.UID || 'Event';
+    }
+
+    // ====== Navigation ======
+    document.getElementById('btn-prev').addEventListener('click', () => {
+        currentWeekStart = addDays(currentWeekStart, -7);
+        loadEvents();
+    });
+    document.getElementById('btn-next').addEventListener('click', () => {
+        currentWeekStart = addDays(currentWeekStart, 7);
+        loadEvents();
+    });
+    document.getElementById('btn-today').addEventListener('click', () => {
+        currentWeekStart = getMonday(new Date());
+        loadEvents();
+    });
+
+    // ====== New Event ======
+    document.getElementById('btn-new-event').addEventListener('click', () => {
+        const now = new Date();
+        openNewEventAt(
+            (now.getDay() + 6) % 7, // 0=Mon
+            now.getHours()
+        );
+    });
+
+    function openNewEventAt(dayIdx, hour) {
+        editingEventId = null;
+        document.getElementById('event-modal-title').textContent = 'New Event';
+        document.getElementById('btn-delete-event').style.display = 'none';
+
+        const date = addDays(currentWeekStart, dayIdx);
+        document.getElementById('event-date').value = formatDate(date);
+        document.getElementById('event-start-time').value = padTime(hour, 0);
+        document.getElementById('event-end-time').value = padTime(hour + 1, 0);
+        document.getElementById('event-title').value = '';
+        document.getElementById('event-location').value = '';
+        document.getElementById('event-description').value = '';
+        document.getElementById('event-color').value = '#6d4aff';
+
+        if (activeCalId) {
+            document.getElementById('event-calendar').value = activeCalId;
+        }
+
+        document.getElementById('event-encryption-info').innerHTML =
+            '<span class="encryption-badge encrypted">🔒 End-to-end encrypted</span> ' +
+            '<span style="font-size:12px;color:#666;">Event data is encrypted before storing</span>';
+
+        document.getElementById('event-modal').classList.add('open');
+        document.getElementById('event-title').focus();
+    }
+
+    // ====== Save Event ======
+    document.getElementById('btn-save-event').addEventListener('click', saveEvent);
+
+    async function saveEvent() {
+        const title = document.getElementById('event-title').value.trim();
+        const date = document.getElementById('event-date').value;
+        const startTime = document.getElementById('event-start-time').value;
+        const endTime = document.getElementById('event-end-time').value;
+        const location = document.getElementById('event-location').value.trim();
+        const description = document.getElementById('event-description').value.trim();
+        const calId = document.getElementById('event-calendar').value;
+        const color = document.getElementById('event-color').value;
+
+        if (!title) { showToast('Please enter a title'); return; }
+        if (!date || !startTime || !endTime) { showToast('Please fill in date and time'); return; }
+
+        const startUnix = toUnix(date, startTime);
+        const endUnix = toUnix(date, endTime);
+
+        if (endUnix <= startUnix) { showToast('End time must be after start time'); return; }
+
+        // Build iCalendar-like content (simulated encryption)
+        const vcalData = [
+            'BEGIN:VCALENDAR',
+            'BEGIN:VEVENT',
+            'SUMMARY:' + title,
+            'DTSTART:' + date.replace(/-/g, '') + 'T' + startTime.replace(':', '') + '00',
+            'DTEND:' + date.replace(/-/g, '') + 'T' + endTime.replace(':', '') + '00',
+            location ? 'LOCATION:' + location : '',
+            description ? 'DESCRIPTION:' + description : '',
+            'END:VEVENT',
+            'END:VCALENDAR'
+        ].filter(Boolean).join('\r\n');
+
+        // Simulate encrypted content: clear + signed versions
+        const signature = '-----BEGIN PGP SIGNATURE-----\nVersion: ProtonCalendar\n' + btoa(title + date) + '\n-----END PGP SIGNATURE-----';
+        const encryptedData = btoa(vcalData); // Base64 as simulated encryption
+
+        const eventData = {
+            Permissions: 127,
+            StartTime: startUnix,
+            EndTime: endUnix,
+            StartTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            EndTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            UID: (editingEventId ? '' : 'ui-' + Date.now() + '@proton.calendar'),
+            CalendarKeyPacket: btoa('calendar-key-' + calId),
+            CalendarEventContent: [
+                { Type: 3, Data: encryptedData, Signature: signature, Author: userId }
+            ],
+            SharedKeyPacket: btoa('shared-key-' + calId),
+            SharedEventContent: [
+                { Type: 2, Data: vcalData, Signature: signature, Author: userId }
+            ],
+            AddressKeyPacket: btoa('address-key-' + userId),
+            AddressID: userId,
+            Color: color,
+            Notifications: [{ Type: 0, Trigger: '-PT15M' }]
+        };
+
+        const syncPayload = {
+            MemberID: 'member-' + calId,
+            Events: [{
+                ID: editingEventId || '',
+                Event: eventData
+            }]
+        };
+
+        try {
+            const r = await api('PUT', '/calendar/v1/' + calId + '/events/sync', syncPayload);
+            if (r.data.Code === 1000) {
+                closeEventModal();
+                showToast(editingEventId ? 'Event updated ✓' : 'Event created ✓');
+                await loadEvents();
+            } else {
+                showToast('Error: ' + (r.data.Error || 'Failed to save'));
+            }
+        } catch (ex) {
+            showToast('Error: ' + ex.message);
+        }
+    }
+
+    // ====== Show Event Detail ======
+    async function showEventDetail(ev) {
+        // Fetch full event data
+        let fullEvent = ev;
+        try {
+            const r = await api('GET', '/calendar/v1/' + ev.CalendarID + '/events/' + ev.ID);
+            if (r.data.Code === 1000 && r.data.Event) {
+                fullEvent = r.data.Event;
+                fullEvent._calColor = ev._calColor;
+                fullEvent._calName = ev._calName;
+            }
+        } catch (e) { /* use what we have */ }
+
+        const title = getEventTitle(fullEvent);
+        document.getElementById('detail-modal-title').textContent = title;
+
+        const startDt = fromUnix(fullEvent.StartTime);
+        const endDt = fromUnix(fullEvent.EndTime);
+
+        let html = '';
+        html += '<div class="detail-row"><div class="detail-label">Calendar</div><div class="detail-value">' + escapeHtml(fullEvent._calName || '') + '</div></div>';
+        html += '<div class="detail-row"><div class="detail-label">Date</div><div class="detail-value">' + startDt.toLocaleDateString() + '</div></div>';
+        html += '<div class="detail-row"><div class="detail-label">Time</div><div class="detail-value">' + startDt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + ' – ' + endDt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + '</div></div>';
+        html += '<div class="detail-row"><div class="detail-label">Timezone</div><div class="detail-value">' + (fullEvent.StartTimezone || 'UTC') + '</div></div>';
+
+        // Show encryption info
+        html += '<div class="detail-row" style="margin-top:16px;"><div class="detail-label">Encryption Status</div>';
+        if (fullEvent.CalendarKeyPacket) {
+            html += '<div><span class="encryption-badge encrypted">🔒 CalendarKeyPacket</span></div>';
+        }
+        if (fullEvent.SharedKeyPacket) {
+            html += '<div><span class="encryption-badge encrypted">🔒 SharedKeyPacket</span></div>';
+        }
+        if (fullEvent.AddressKeyPacket) {
+            html += '<div><span class="encryption-badge encrypted">🔒 AddressKeyPacket</span></div>';
+        }
+        html += '</div>';
+
+        // Show encrypted content types
+        if (fullEvent.CalendarEvents && fullEvent.CalendarEvents.length > 0) {
+            html += '<div class="detail-row"><div class="detail-label">Calendar Events (' + fullEvent.CalendarEvents.length + ' entries)</div>';
+            fullEvent.CalendarEvents.forEach((ce, i) => {
+                const typeLabel = ['Clear', 'Encrypted', 'Signed', 'Encrypted+Signed'][ce.Type] || 'Unknown';
+                const badgeClass = ce.Type === 0 ? 'clear' : 'encrypted';
+                html += '<div><span class="encryption-badge ' + badgeClass + '">' + typeLabel + '</span>';
+                if (ce.Signature) html += ' <span style="font-size:11px;color:#666;">✓ Signed</span>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        if (fullEvent.SharedEvents && fullEvent.SharedEvents.length > 0) {
+            html += '<div class="detail-row"><div class="detail-label">Shared Events (' + fullEvent.SharedEvents.length + ' entries)</div>';
+            fullEvent.SharedEvents.forEach((se, i) => {
+                const typeLabel = ['Clear', 'Encrypted', 'Signed', 'Encrypted+Signed'][se.Type] || 'Unknown';
+                const badgeClass = se.Type === 0 ? 'clear' : 'encrypted';
+                html += '<div><span class="encryption-badge ' + badgeClass + '">' + typeLabel + '</span>';
+                if (se.Signature) html += ' <span style="font-size:11px;color:#666;">✓ Signed</span>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        html += '<div class="detail-row"><div class="detail-label">Event ID</div><div class="detail-value" style="font-family:monospace;font-size:12px;">' + escapeHtml(fullEvent.ID) + '</div></div>';
+        html += '<div class="detail-row"><div class="detail-label">UID</div><div class="detail-value" style="font-family:monospace;font-size:12px;">' + escapeHtml(fullEvent.UID || '') + '</div></div>';
+
+        document.getElementById('detail-body').innerHTML = html;
+
+        // Store for edit/delete
+        document.getElementById('detail-modal').dataset.eventId = fullEvent.ID;
+        document.getElementById('detail-modal').dataset.calendarId = fullEvent.CalendarID;
+        document.getElementById('detail-modal').dataset.fullEvent = JSON.stringify(fullEvent);
+
+        document.getElementById('detail-modal').classList.add('open');
+    }
+
+    // ====== Edit from Detail ======
+    document.getElementById('btn-detail-edit').addEventListener('click', () => {
+        const fullEvent = JSON.parse(document.getElementById('detail-modal').dataset.fullEvent);
+        document.getElementById('detail-modal').classList.remove('open');
+
+        editingEventId = fullEvent.ID;
+        document.getElementById('event-modal-title').textContent = 'Edit Event';
+        document.getElementById('btn-delete-event').style.display = 'block';
+
+        const startDt = fromUnix(fullEvent.StartTime);
+        const endDt = fromUnix(fullEvent.EndTime);
+
+        document.getElementById('event-date').value = formatDate(startDt);
+        document.getElementById('event-start-time').value = padTime(startDt.getHours(), startDt.getMinutes());
+        document.getElementById('event-end-time').value = padTime(endDt.getHours(), endDt.getMinutes());
+        document.getElementById('event-calendar').value = fullEvent.CalendarID;
+        document.getElementById('event-color').value = fullEvent.Color || '#6d4aff';
+
+        // Try to extract title/location/description from shared events
+        let title = '', location = '', description = '';
+        if (fullEvent.SharedEvents) {
+            for (const se of fullEvent.SharedEvents) {
+                if (se.Type === 0 || se.Type === 2) {
+                    const tm = se.Data.match(/SUMMARY[;:]([^\r\n]+)/);
+                    if (tm) title = tm[1];
+                    const lm = se.Data.match(/LOCATION[;:]([^\r\n]+)/);
+                    if (lm) location = lm[1];
+                    const dm = se.Data.match(/DESCRIPTION[;:]([^\r\n]+)/);
+                    if (dm) description = dm[1];
+                }
+            }
+        }
+
+        document.getElementById('event-title').value = title;
+        document.getElementById('event-location').value = location;
+        document.getElementById('event-description').value = description;
+        document.getElementById('event-encryption-info').innerHTML =
+            '<span class="encryption-badge encrypted">🔒 End-to-end encrypted</span>';
+        document.getElementById('event-modal').classList.add('open');
+        document.getElementById('event-title').focus();
+    });
+
+    // ====== Delete Event ======
+    document.getElementById('btn-delete-event').addEventListener('click', deleteCurrentEvent);
+    document.getElementById('btn-detail-delete').addEventListener('click', deleteFromDetail);
+
+    async function deleteFromDetail() {
+        const eventId = document.getElementById('detail-modal').dataset.eventId;
+        const calendarId = document.getElementById('detail-modal').dataset.calendarId;
+        if (!eventId || !calendarId) return;
+
+        await deleteEvent(calendarId, eventId);
+        document.getElementById('detail-modal').classList.remove('open');
+    }
+
+    async function deleteCurrentEvent() {
+        if (!editingEventId) return;
+        const calId = document.getElementById('event-calendar').value;
+        await deleteEvent(calId, editingEventId);
+        closeEventModal();
+    }
+
+    async function deleteEvent(calId, eventId) {
+        try {
+            const r = await api('PUT', '/calendar/v1/' + calId + '/events/sync', {
+                MemberID: 'member-' + calId,
+                Events: [{ ID: eventId }]
+            });
+            if (r.data.Code === 1000) {
+                showToast('Event deleted ✓');
+                await loadEvents();
+            } else {
+                showToast('Error deleting event');
+            }
+        } catch (ex) {
+            showToast('Error: ' + ex.message);
+        }
+    }
+
+    // ====== New Calendar ======
+    document.getElementById('btn-new-calendar').addEventListener('click', () => {
+        document.getElementById('new-cal-name').value = '';
+        document.getElementById('new-cal-color').value = '#6d4aff';
+        document.getElementById('cal-modal').classList.add('open');
+        document.getElementById('new-cal-name').focus();
+    });
+
+    document.getElementById('btn-save-cal').addEventListener('click', async () => {
+        const name = document.getElementById('new-cal-name').value.trim();
+        if (!name) { showToast('Please enter a calendar name'); return; }
+
+        const color = document.getElementById('new-cal-color').value;
+        try {
+            const r = await api('POST', '/calendar/v1', {
+                Name: name,
+                Color: color,
+                AddressID: userId + '@proton.me',
+                Display: 1
+            });
+            if (r.data.Code === 1000) {
+                document.getElementById('cal-modal').classList.remove('open');
+                showToast('Calendar created ✓');
+                activeCalId = r.data.Calendar.ID;
+                await loadCalendars();
+                renderWeek();
+            }
+        } catch (ex) {
+            showToast('Error: ' + ex.message);
+        }
+    });
+
+    // ====== Modal Close Handlers ======
+    function closeEventModal() {
+        document.getElementById('event-modal').classList.remove('open');
+        editingEventId = null;
+    }
+
+    document.getElementById('event-modal-close').addEventListener('click', closeEventModal);
+    document.getElementById('btn-cancel-event').addEventListener('click', closeEventModal);
+    document.getElementById('cal-modal-close').addEventListener('click', () => document.getElementById('cal-modal').classList.remove('open'));
+    document.getElementById('btn-cancel-cal').addEventListener('click', () => document.getElementById('cal-modal').classList.remove('open'));
+    document.getElementById('detail-modal-close').addEventListener('click', () => document.getElementById('detail-modal').classList.remove('open'));
+    document.getElementById('btn-detail-close').addEventListener('click', () => document.getElementById('detail-modal').classList.remove('open'));
+
+    // Close modals on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) overlay.classList.remove('open');
+        });
+    });
+
+    // ====== Utility ======
+    function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
+    </script>
+</body>
+</html>

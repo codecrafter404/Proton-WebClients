@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calendar-api
+  namespace: proton-calendar
+  labels:
+    app.kubernetes.io/name: proton-calendar
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1          # SQLite is single-writer; keep replicas at 1
+  strategy:
+    type: Recreate     # Avoid two pods writing to the same PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: proton-calendar
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: proton-calendar
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: calendar-api
+          image: proton-calendar-api:latest   # Replace with your registry image
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-addr"
+            - ":8080"
+            - "-db"
+            - "/data/calendar.db"
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: db-storage
+              mountPath: /data
+      volumes:
+        - name: db-storage
+          persistentVolumeClaim:
+            claimName: calendar-db

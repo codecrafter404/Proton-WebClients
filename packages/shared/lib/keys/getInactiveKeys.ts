@@ -10,6 +10,9 @@ import type {
 } from './reactivation/interface';
 
 export const getInactiveKeys = async (Keys: Key[], decryptedKeys: DecryptedKey[]): Promise<InactiveKey[]> => {
+    if (!Keys) {
+        return [];
+    }
     const decryptedKeysIDs = new Set<string>(decryptedKeys.map(({ ID }) => ID));
     const inactiveKeys = Keys.filter(({ ID }) => !decryptedKeysIDs.has(ID));
     return Promise.all(

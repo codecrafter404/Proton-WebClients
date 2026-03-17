@@ -50,3 +50,29 @@ tests/mail/old/binaries/tokens.json
 *:Zone.Identifier
 CLAUDE.md
 .taskmaster*
+# Go backend
+backend/calendar.db
+*.db
+
+# E2E test artifacts
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/screenshots/
+backend/calendar-api
+backend/calendar.db-shm
+backend/calendar.db-wal
+e2e/package-lock.json
+
+# Mobile build artifacts
+mobile/android-calendar/local.properties
+mobile/android-calendar/.gradle/
+mobile/android-calendar/app/build/
+mobile/android-calendar/build/
+mobile/android-calendar/week-view-core/build/
+mobile/android-calendar/shared-test-code/build/
+*.apk
+*.aab
+applications/calendar/dist/
+backend/calendar.db
+backend/calendar-api

@@ -1,7 +1,0 @@
-@use '~@proton/styles/scss/lib/config' as *;
-@use '~@proton/styles/scss/lib/rem' as *;
-
-.pass-aliases-modal {
-	// Special case otherwise modal is not properly displayed
-	--size: #{rem(700)};
-}

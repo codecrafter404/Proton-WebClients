@@ -21,8 +21,8 @@ const selector = createSelector(
     (addresses, addressKeys): Result => {
         const loading =
             addresses === undefined ||
-            Object.keys(addressKeys).length === 0 ||
-            addresses.every(({ ID }) => addressKeys[ID]?.value === undefined);
+            Object.keys(addressKeys ?? {}).length === 0 ||
+            addresses.every(({ ID }) => addressKeys?.[ID]?.value === undefined);
         return {
             value:
                 loading || !addresses

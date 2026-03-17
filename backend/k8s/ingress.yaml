@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: calendar-api
+  namespace: proton-calendar
+  labels:
+    app.kubernetes.io/name: proton-calendar
+    app.kubernetes.io/component: api
+  annotations:
+    # Uncomment for cert-manager TLS:
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx    # Change to your ingress controller class
+  rules:
+    - host: calendar-api.example.com    # Replace with your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: calendar-api
+                port:
+                  name: http
+  # Uncomment for TLS:
+  # tls:
+  #   - hosts:
+  #       - calendar-api.example.com
+  #     secretName: calendar-api-tls

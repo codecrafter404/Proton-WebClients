@@ -49,9 +49,6 @@ export const mergeEntry = (originalEntry: any, entry: any) => {
 };
 
 export const addDevEntry = (config: any) => {
-    if (config.mode === 'production') {
-        return;
-    }
     // @ts-ignore
     config.entry.dev = [require.resolve('@proton/components/containers/app/StandaloneApp.tsx')];
     config.plugins.push(
@@ -62,11 +59,13 @@ export const addDevEntry = (config: any) => {
             inject: 'body',
         })
     );
-    // @ts-ignore
-    config.devServer.historyApiFallback.rewrites = config.devServer.historyApiFallback.rewrites || [];
-    // @ts-ignore
-    config.devServer.historyApiFallback.rewrites.push({
-        from: '/login',
-        to: '/login.html',
-    });
+    if (config.devServer) {
+        // @ts-ignore
+        config.devServer.historyApiFallback.rewrites = config.devServer.historyApiFallback.rewrites || [];
+        // @ts-ignore
+        config.devServer.historyApiFallback.rewrites.push({
+            from: '/login',
+            to: '/login.html',
+        });
+    }
 };
