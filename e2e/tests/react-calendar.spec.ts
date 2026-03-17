@@ -18,6 +18,7 @@ const SCREENSHOTS_DIR = path.join(__dirname, '..', 'screenshots-react');
 const LONG_TIMEOUT = 30_000;
 const MED_TIMEOUT = 15_000;
 const SHORT_TIMEOUT = 5_000;
+const MONTH_NAME_RE = /january|february|march|april|may|june|july|august|september|october|november|december/i;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -116,7 +117,7 @@ test.describe('React Frontend – Login Flow', () => {
         await login(page);
         await expect(page.getByRole('button', { name: 'New event' }))
             .toBeVisible();
-        await expect(page.getByRole('heading', { level: 2 }).filter({ hasText: /march|april|may|june|july|august|september|october|november|december|january|february/i }))
+        await expect(page.getByRole('heading', { level: 2 }).filter({ hasText: MONTH_NAME_RE }))
             .toBeVisible();
         await snap(page, '02-calendar-loaded');
     });
@@ -181,7 +182,7 @@ test.describe('React Frontend – Navigation', () => {
 
         // Get current heading text (month name)
         const heading = page.getByRole('heading', { level: 2 }).filter({
-            hasText: /january|february|march|april|may|june|july|august|september|october|november|december/i,
+            hasText: MONTH_NAME_RE,
         }).first();
         await expect(heading).toBeVisible({ timeout: SHORT_TIMEOUT });
 
@@ -215,17 +216,14 @@ test.describe('React Frontend – Event Creation', () => {
         await loginAndSetup(page);
 
         await page.getByRole('button', { name: 'New event' }).click();
-        await page.waitForTimeout(2000);
 
-        // The event form should show title input and Save button
+        // Wait for either the event form or a URL change
         const titleInput = page.getByRole('textbox', { name: /title/i })
             .or(page.locator('input[placeholder*="Add title"]'))
             .or(page.locator('[data-testid="event-title-input"]'));
-        
         const saveBtn = page.getByRole('button', { name: /save/i });
 
-        // Check if either the popover or full form appeared
-        const formVisible = await titleInput.isVisible().catch(() => false);
+        const formVisible = await titleInput.waitFor({ state: 'visible', timeout: SHORT_TIMEOUT }).then(() => true).catch(() => false);
         const saveVisible = await saveBtn.isVisible().catch(() => false);
 
         if (formVisible || saveVisible) {
@@ -240,14 +238,13 @@ test.describe('React Frontend – Event Creation', () => {
         await loginAndSetup(page);
 
         await page.getByRole('button', { name: 'New event' }).click();
-        await page.waitForTimeout(2000);
 
-        // Try to fill the title
+        // Wait for the title input to appear
         const titleInput = page.getByRole('textbox', { name: /title/i })
             .or(page.locator('input[placeholder*="Add title"]'))
             .or(page.locator('input[name="title"]'));
 
-        const inputVisible = await titleInput.first().isVisible().catch(() => false);
+        const inputVisible = await titleInput.first().waitFor({ state: 'visible', timeout: SHORT_TIMEOUT }).then(() => true).catch(() => false);
         if (inputVisible) {
             await titleInput.first().fill('E2E Test Event');
             await snap(page, '13-event-title-filled');
@@ -256,7 +253,8 @@ test.describe('React Frontend – Event Creation', () => {
             const saveBtn = page.getByRole('button', { name: /save/i }).first();
             if (await saveBtn.isVisible().catch(() => false)) {
                 await saveBtn.click();
-                await page.waitForTimeout(3000);
+                // Wait for the form to close or event to appear on calendar
+                await expect(saveBtn).toBeHidden({ timeout: SHORT_TIMEOUT }).catch(() => {});
                 await snap(page, '14-event-saved');
             }
         } else {
@@ -301,16 +299,23 @@ test.describe('React Frontend – Full E2E Flow', () => {
 
         // Step 4: Navigate weeks
         await page.getByRole('button', { name: 'Next week' }).click();
-        await page.waitForTimeout(500);
+        // Wait for the heading to update (proves navigation completed)
+        await expect(page.getByRole('heading', { level: 2 }).filter({ hasText: MONTH_NAME_RE }).first())
+            .toBeVisible({ timeout: SHORT_TIMEOUT });
         await snap(page, '22-flow-next-week');
 
         await page.getByRole('button', { name: 'Today' }).click();
-        await page.waitForTimeout(500);
+        await expect(page.getByRole('heading', { level: 2 }).filter({ hasText: MONTH_NAME_RE }).first())
+            .toBeVisible({ timeout: SHORT_TIMEOUT });
         await snap(page, '23-flow-today');
 
         // Step 5: Try creating an event
         await page.getByRole('button', { name: 'New event' }).click();
-        await page.waitForTimeout(2000);
+        // Wait for event form or URL change
+        await page.getByRole('textbox', { name: /title/i })
+            .or(page.locator('input[placeholder*="Add title"]'))
+            .waitFor({ state: 'visible', timeout: SHORT_TIMEOUT })
+            .catch(() => {});
         await snap(page, '24-flow-new-event');
 
         // Step 6: Check user profile
@@ -319,16 +324,18 @@ test.describe('React Frontend – Full E2E Flow', () => {
 
         // Step 7: Logout
         await userButton.click();
-        await page.waitForTimeout(1000);
-        await snap(page, '25-flow-user-menu');
-
+        // Wait for the dropdown menu to appear
         const signOutBtn = page.getByRole('button', { name: /sign out/i })
             .or(page.getByText('Sign out'));
-        const signOutVisible = await signOutBtn.first().isVisible().catch(() => false);
+        await signOutBtn.first().waitFor({ state: 'visible', timeout: SHORT_TIMEOUT }).catch(() => {});
+        await snap(page, '25-flow-user-menu');
 
+        const signOutVisible = await signOutBtn.first().isVisible().catch(() => false);
         if (signOutVisible) {
             await signOutBtn.first().click();
-            await page.waitForTimeout(3000);
+            // Wait for the login screen to appear
+            await expect(page.getByRole('textbox', { name: 'Email or username' }))
+                .toBeVisible({ timeout: MED_TIMEOUT }).catch(() => {});
             await snap(page, '26-flow-signed-out');
         } else {
             await snap(page, '26-flow-no-signout-btn');
